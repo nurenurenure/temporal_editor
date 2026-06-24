@@ -1,5 +1,8 @@
+networks:
+  local-temporal-network:
+    driver: bridge
+
 services:
-  # PostgreSQL для Temporal
   postgresql:
     image: postgres:15-alpine
     container_name: temporal-postgres
@@ -16,31 +19,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - local-temporal-network
     restart: unless-stopped
 
-  # Temporal Server с PostgreSQL
   temporal:
-    image: temporalio/temporal:latest
-    container_name: temporal-server
+    container_name: temporal
     depends_on:
       postgresql:
         condition: service_healthy
-    command: 
-      - server
-      - start-dev
-      - --ip=0.0.0.0
-      - --db=postgresql
-      - --db-host=postgresql
-      - --db-port=5432
-      - --db-user=temporal
-      - --db-password=temporal
-      - --db-name=temporal
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - DBNAME=temporal
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - PROMETHEUS_ENDPOINT=0.0.0.0:8000
+    image: temporalio/auto-setup:1.27.1
+    networks:
+      - local-temporal-network
     ports:
-      - "7233:7233"   
-      - "8233:8233"   
+      - "7233:7233"
+      - "8000:8000"
+    restart: unless-stopped
+
+  temporal-ui:
+    container_name: temporal-ui
+    depends_on:
+      - temporal
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_UI_PORT=8233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    image: temporalio/ui:2.36.0
+    networks:
+      - local-temporal-network
+    ports:
+      - "8233:8080"
     restart: unless-stopped
 
 volumes:
