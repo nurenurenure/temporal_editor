@@ -1,9 +1,47 @@
-version: "3.8"
-
 services:
+  # PostgreSQL для Temporal
+  postgresql:
+    image: postgres:15-alpine
+    container_name: temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Temporal Server с PostgreSQL
   temporal:
     image: temporalio/temporal:latest
-    command: server start-dev --ip 0.0.0.0
+    container_name: temporal-server
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    command: 
+      - server
+      - start-dev
+      - --ip=0.0.0.0
+      - --db=postgresql
+      - --db-host=postgresql
+      - --db-port=5432
+      - --db-user=temporal
+      - --db-password=temporal
+      - --db-name=temporal
     ports:
-      - "7233:7233"
-      - "8233:8233"
+      - "7233:7233"   
+      - "8233:8233"   
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_UI_PORT=8233
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
