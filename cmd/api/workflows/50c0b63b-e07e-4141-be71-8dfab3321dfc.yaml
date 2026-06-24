@@ -1,0 +1,15 @@
+document:
+    dsl: 1.0.0
+    taskQueue: zigflow
+    workflowType: custom-wf-50c0b63b-e07e-4141-be71-8dfab3321dfc
+    version: 0.0.1
+    title: My First API Workflow
+    summary: Тестируем прием JSON
+do:
+    - mySetVariables:
+        set:
+            variables:
+                user_id: 123
+    - myWaitStep:
+        wait:
+            seconds: 10

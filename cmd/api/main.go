@@ -1,24 +1,61 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
+	"go.temporal.io/sdk/client"
 	"gopkg.in/yaml.v3"
 
 	"temporal_editor/internal/database"
 	"temporal_editor/internal/models"
 )
 
-/*
-1. /workflows - список workflow.
-2. /workflows/new - создание.
-3. /workflows/:id/edit - редактирование.
-4. /runs/:id - детали запуска (убедится, что есть АПИ для получения деталей
-запуска с temporal).
-*/
+var temporalClient client.Client
+
+func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	// 1. Берем данные из БД
+	wf, err := database.GetWorkflowByID(id)
+	if err != nil {
+		http.Error(w, "Workflow не найден", http.StatusNotFound)
+		return
+	}
+
+	// Настраиваем опции запуска
+	workflowOptions := client.StartWorkflowOptions{
+		ID:        "wf-" + wf.ID, // Уникальный ID для каждого запуска
+		TaskQueue: "zigflow",
+	}
+
+	// запуск workflow через sdk
+	// wf — это объект, который пойдет как аргумент в воркфлоу
+	we, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		workflowOptions,
+		"hello-world",
+		wf, // Передаем данные воркфлоу
+	)
+
+	if err != nil {
+		http.Error(w, "Ошибка запуска workflow: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Возвращаем результат
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":      "started",
+		"workflow_id": we.GetID(),
+		"run_id":      we.GetRunID(),
+	})
+}
+
 func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	var wf models.Workflow
 
@@ -28,27 +65,73 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сохраняем в Postgres
+	// Сохраняем в БД (чтобы получить ID)
 	if err := database.SaveWorkflow(&wf); err != nil {
 		http.Error(w, "Ошибка БД: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 3. Генерируем YAML
-	yamlData, err := yaml.Marshal(&wf)
+	// Формируем структуру для YAML
+	// Превращаем массив StepInput в список мап для YAML
+	var doSteps []map[string]interface{}
+	for _, step := range wf.Steps {
+		// Собираем вложенную структуру: { "ИмяШага": { "ТипДействия": { ...параметры } } }
+		stepMap := map[string]interface{}{
+			step.Name: map[string]interface{}{
+				step.Action: step.Params,
+			},
+		}
+		doSteps = append(doSteps, stepMap)
+	}
+
+	// Создаем структуру для YAML
+	yamlObj := models.ZigflowConfig{
+		Document: models.Document{
+			DSL:          "1.0.0",
+			TaskQueue:    "zigflow",
+			WorkflowType: "custom-wf-" + wf.ID,
+			Version:      "0.0.1",
+			Title:        wf.Name,
+			Summary:      wf.Description,
+		},
+		Do: doSteps,
+	}
+
+	// Маршалим yamlObj
+	yamlData, err := yaml.Marshal(&yamlObj)
 	if err != nil {
-		http.Error(w, "Ошибка генерации YAML", http.StatusInternalServerError)
+		http.Error(w, "Ошибка генерации YAML: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Printf("Успешно сохранен Воркфлоу ID: %s\nYAML:\n%s\n", wf.ID, string(yamlData))
 
-	// 4. Отвечаем фронтенду уже с заполненным ID
+	// Сохраняем файл
+	yamlPath := fmt.Sprintf("./workflows/%s.yaml", wf.ID)
+	if err := os.WriteFile(yamlPath, yamlData, 0644); err != nil {
+		http.Error(w, "Ошибка записи файла: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Запуск Workflow в Temporal
+	workflowOptions := client.StartWorkflowOptions{
+		ID:        "wf-" + wf.ID,
+		TaskQueue: "zigflow",
+	}
+
+	workflowType := "custom-wf-" + wf.ID
+
+	we, err := temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, workflowType, wf)
+
+	if err != nil {
+		http.Error(w, "Ошибка Temporal: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Ответ
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "success",
-		"id":      wf.ID,
-		"message": "Воркфлоу успешно сохранен",
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":          wf.ID,
+		"yaml_file":   yamlPath,
+		"workflow_id": we.GetID(),
+		"run_id":      we.GetRunID(),
 	})
 }
 
@@ -68,7 +151,6 @@ func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Смотрим, что достали из базы
 	log.Printf("2. Данные из базы: %+v", wf)
 
 	// Превращаем структуру в массив байт (JSON) вручную
@@ -86,19 +168,33 @@ func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Строка подключения к базе
-	connStr := "host=localhost port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
-
 	// Инициализируем базу данных
+	connStr := "host=localhost port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
 	if err := database.InitDB(connStr); err != nil {
 		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
 	}
 	fmt.Println("Успешное подключение к Postgres!")
 
+	// Инициализируем Temporal Client
+	c, err := client.Dial(client.Options{
+		HostPort: "localhost:7233", // Адрес твоего Temporal сервера
+	})
+	if err != nil {
+		log.Fatalln("Не удалось создать Temporal client:", err)
+	}
+	defer c.Close() // Закроем соединение при завершении работы программы
+	temporalClient = c
+	fmt.Println("Успешное подключение к Temporal!")
+
+	//Настройка маршрутов
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/workflows", createWorkflowHandler)
 	mux.HandleFunc("GET /api/workflows/{id}", getWorkflowHandler)
+	mux.HandleFunc("POST /api/workflows/{id}/run", runWorkflowHandler)
 
+	//Запуск HTTP сервера
 	fmt.Println("Сервер запущен на http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatal("Ошибка сервера:", err)
+	}
 }

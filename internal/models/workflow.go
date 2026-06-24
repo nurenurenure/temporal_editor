@@ -1,39 +1,32 @@
 package models
 
-/*
-+set
-switch
-if
-for-loop
-+wait
-call: activity
-output
-*fork
-*try
-*signal
-*call: grpc
-*/
-// Workflow описывает весь процесс
 type Workflow struct {
-	ID          string `json:"id" db:"id" yaml:"-"`
-	Name        string `json:"name" yaml:"name"`
-	Description string `json:"description" yaml:"description"`
-	Steps       []Step `json:"steps" yaml:"steps"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Steps       []StepInput `json:"steps"` // Это входные данные
 }
 
-// Step объединяет возможные операции.
-type Step struct {
-	Set    *SetOperation          `json:"set,omitempty" yaml:"set,omitempty"`
-	Wait   *WaitOperation         `json:"wait,omitempty" yaml:"wait,omitempty"`
-	Output map[string]interface{} `json:"output,omitempty" yaml:"output,omitempty"`
+// Структура для входящего JSON
+type StepInput struct {
+	Name   string                 `json:"name"`
+	Action string                 `json:"action"`
+	Params map[string]interface{} `json:"params"`
 }
 
-// SetOperation для объявления переменных
-type SetOperation struct {
-	Variables map[string]interface{} `json:"variables" yaml:"variables"`
+// Структура для YAML (для Zigflow)
+type ZigflowConfig struct {
+	Document Document                 `yaml:"document"`
+	Do       []map[string]interface{} `yaml:"do"` // Список мап, где ключи - это имена шагов
+}
+type Document struct {
+	DSL          string `yaml:"dsl"`
+	TaskQueue    string `yaml:"taskQueue"`
+	WorkflowType string `yaml:"workflowType"`
+	Version      string `yaml:"version"`
+	Title        string `yaml:"title"`
+	Summary      string `yaml:"summary"`
 }
 
-// WaitOperation для задержки
-type WaitOperation struct {
-	Duration string `json:"duration" yaml:"duration"`
-}
+// Step — это map, который принимает {"имя": {"действие": {...}}}
+type Step map[string]interface{}
