@@ -32,13 +32,13 @@ func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		ID:        "wf-" + wf.ID, // Уникальный ID для каждого запуска
 		TaskQueue: "zigflow",
 	}
-
+	workflowType := "custom-wf-" + wf.ID
 	// запуск workflow через sdk
 	// wf — это объект, который пойдет как аргумент в воркфлоу
 	we, err := temporalClient.ExecuteWorkflow(
 		context.Background(),
 		workflowOptions,
-		"hello-world",
+		workflowType,
 		wf, // Передаем данные воркфлоу
 	)
 
@@ -46,13 +46,16 @@ func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка запуска workflow: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Формируем прямую ссылку на Temporal Web UI
+	uiURL := fmt.Sprintf("http://localhost:8233/namespaces/default/workflows/%s/%s", we.GetID(), we.GetRunID())
 
 	// Возвращаем результат
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":      "started",
-		"workflow_id": we.GetID(),
-		"run_id":      we.GetRunID(),
+		"status":          "started",
+		"workflow_id":     we.GetID(),
+		"run_id":          we.GetRunID(),
+		"temporal_ui_url": uiURL,
 	})
 }
 
@@ -72,10 +75,8 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Формируем структуру для YAML
-	// Превращаем массив StepInput в список мап для YAML
 	var doSteps []map[string]interface{}
 	for _, step := range wf.Steps {
-		// Собираем вложенную структуру: { "ИмяШага": { "ТипДействия": { ...параметры } } }
 		stepMap := map[string]interface{}{
 			step.Name: map[string]interface{}{
 				step.Action: step.Params,
@@ -110,28 +111,12 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка записи файла: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Запуск Workflow в Temporal
-	workflowOptions := client.StartWorkflowOptions{
-		ID:        "wf-" + wf.ID,
-		TaskQueue: "zigflow",
-	}
-
-	workflowType := "custom-wf-" + wf.ID
-
-	we, err := temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, workflowType, wf)
-
-	if err != nil {
-		http.Error(w, "Ошибка Temporal: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Ответ
+	// Ответ фронтенду
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"id":          wf.ID,
-		"yaml_file":   yamlPath,
-		"workflow_id": we.GetID(),
-		"run_id":      we.GetRunID(),
+		"id":        wf.ID,
+		"yaml_file": yamlPath,
+		"status":    "created",
 	})
 }
 
@@ -177,7 +162,7 @@ func main() {
 
 	// Инициализируем Temporal Client
 	c, err := client.Dial(client.Options{
-		HostPort: "localhost:7233", // Адрес твоего Temporal сервера
+		HostPort: "localhost:7233",
 	})
 	if err != nil {
 		log.Fatalln("Не удалось создать Temporal client:", err)
