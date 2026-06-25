@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"go.temporal.io/sdk/client"
 	"gopkg.in/yaml.v3"
@@ -55,15 +56,14 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Перезаписываем YAML-файл, чтобы воркер получил новую версию!
 	var doSteps []map[string]interface{}
+
 	for _, step := range wf.Steps {
-		stepMap := map[string]interface{}{
-			step.Name: map[string]interface{}{
-				step.Action: step.Params,
+		doSteps = append(doSteps,
+			map[string]interface{}{
+				step.Name: step.Body,
 			},
-		}
-		doSteps = append(doSteps, stepMap)
+		)
 	}
 
 	yamlObj := models.ZigflowConfig{
@@ -103,26 +103,30 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// 1. Берем данные из БД
-	wf, err := database.GetWorkflowByID(id)
-	if err != nil {
-		http.Error(w, "Workflow не найден", http.StatusNotFound)
+	// 1. Читаем Payload (данные для цикла) из тела запроса
+	var payload models.WorkflowPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Ошибка чтения данных: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Настраиваем опции запуска
 	workflowOptions := client.StartWorkflowOptions{
-		ID:        "wf-" + wf.ID, // Уникальный ID для каждого запуска
+		ID:        "wf-" + id + "-" + fmt.Sprint(time.Now().Unix()), // Добавим timestamp для уникальности
 		TaskQueue: "zigflow",
 	}
-	workflowType := "custom-wf-" + wf.ID
-	// запуск workflow через sdk
-	// wf — это объект, который пойдет как аргумент в воркфлоу
+
+	workflowType := "custom-wf-" + id
+
+	// Передаем map, где ключ "data" соответствует ожиданию в YAML
+	inputData := map[string]interface{}{
+		"data": payload.Data,
+	}
+
 	we, err := temporalClient.ExecuteWorkflow(
 		context.Background(),
 		workflowOptions,
 		workflowType,
-		wf, // Передаем данные воркфлоу
+		inputData, // <--- ЭТО СТАНЕТ $input внутри YAML
 	)
 
 	if err != nil {
@@ -158,13 +162,13 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Формируем структуру для YAML
 	var doSteps []map[string]interface{}
+
 	for _, step := range wf.Steps {
-		stepMap := map[string]interface{}{
-			step.Name: map[string]interface{}{
-				step.Action: step.Params,
+		doSteps = append(doSteps,
+			map[string]interface{}{
+				step.Name: step.Body,
 			},
-		}
-		doSteps = append(doSteps, stepMap)
+		)
 	}
 
 	// Создаем структуру для YAML
