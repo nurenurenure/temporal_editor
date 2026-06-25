@@ -13,9 +13,92 @@ import (
 
 	"temporal_editor/internal/database"
 	"temporal_editor/internal/models"
+	"temporal_editor/internal/validator"
 )
 
 var temporalClient client.Client
+
+func getAllWorkflowsHandler(w http.ResponseWriter, r *http.Request) {
+	workflows, err := database.GetAllWorkflows()
+	if err != nil {
+		log.Printf("Ошибка получения списка воркфлоу: %v", err)
+		http.Error(w, "Ошибка сервера", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(workflows)
+}
+
+func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "ID не указан", http.StatusBadRequest)
+		return
+	}
+
+	var wf models.Workflow
+	if err := json.NewDecoder(r.Body).Decode(&wf); err != nil {
+		http.Error(w, "Ошибка чтения JSON", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Валидация шагов
+	if err := validator.ValidateSteps(wf.Steps); err != nil {
+		http.Error(w, "Ошибка валидации: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 2. Обновляем в БД
+	if err := database.UpdateWorkflow(id, &wf); err != nil {
+		http.Error(w, "Ошибка обновления в БД: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Перезаписываем YAML-файл, чтобы воркер получил новую версию!
+	var doSteps []map[string]interface{}
+	for _, step := range wf.Steps {
+		stepMap := map[string]interface{}{
+			step.Name: map[string]interface{}{
+				step.Action: step.Params,
+			},
+		}
+		doSteps = append(doSteps, stepMap)
+	}
+
+	yamlObj := models.ZigflowConfig{
+		Document: models.Document{
+			DSL:          "1.0.0",
+			TaskQueue:    "zigflow",
+			WorkflowType: "custom-wf-" + id, // Используем id из URL
+			Version:      "0.0.1",
+			Title:        wf.Name,
+			Summary:      wf.Description,
+		},
+		Do: doSteps,
+	}
+
+	yamlData, err := yaml.Marshal(&yamlObj)
+	if err != nil {
+		http.Error(w, "Ошибка генерации YAML", http.StatusInternalServerError)
+		return
+	}
+
+	yamlPath := fmt.Sprintf("./workflows/%s.yaml", id)
+	if err := os.WriteFile(yamlPath, yamlData, 0644); err != nil {
+		http.Error(w, "Ошибка перезаписи файла: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Отдаем успешный ответ
+	wf.ID = id // Гарантируем, что ID в ответе правильный
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":   "Воркфлоу успешно обновлен",
+		"id":        id,
+		"yaml_file": yamlPath,
+	})
+}
 
 func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -73,7 +156,6 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка БД: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	// Формируем структуру для YAML
 	var doSteps []map[string]interface{}
 	for _, step := range wf.Steps {
@@ -176,6 +258,8 @@ func main() {
 	mux.HandleFunc("POST /api/workflows", createWorkflowHandler)
 	mux.HandleFunc("GET /api/workflows/{id}", getWorkflowHandler)
 	mux.HandleFunc("POST /api/workflows/{id}/run", runWorkflowHandler)
+	mux.HandleFunc("GET /api/workflows", getAllWorkflowsHandler)
+	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
 
 	//Запуск HTTP сервера
 	fmt.Println("Сервер запущен на http://localhost:8080")
