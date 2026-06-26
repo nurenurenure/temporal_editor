@@ -31,49 +31,48 @@ func restartZigflowWorker() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// останавливаем старый воркер, если он запущен
-	if workerCmd != nil && workerCmd.Process != nil {
-		fmt.Println("🔄 Обнаружен новый воркфлоу! Перезапускаем воркер Zigflow...")
+	fmt.Println("🔄 Перезапуск Zigflow Worker...")
 
-		// Посылаем Ctrl+C
-		_ = workerCmd.Process.Signal(os.Interrupt)
-
-		// Ждем максимум 2 секунды, пока он закроет соединения
-		done := make(chan error, 1)
-		go func() {
-			_, err := workerCmd.Process.Wait()
-			done <- err
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			_ = workerCmd.Process.Kill()
-		}
-	}
-
-	// Получаем путь к домашней директории
-	homeDir, err := os.UserHomeDir()
+	// Абсолютный путь к папке workflows
+	workflowDir, err := filepath.Abs("./workflows")
 	if err != nil {
-		fmt.Printf("❌ Ошибка получения домашней директории: %v\n", err)
+		fmt.Printf("❌ Не удалось получить путь к workflows: %v\n", err)
 		return
 	}
-	zigflowPath := filepath.Join(homeDir, "go", "bin", "zigflow")
 
-	// 2. Запускаем воркер заново
-	workerCmd = exec.Command(zigflowPath, "run", "--dir", "./workflows")
+	// Останавливаем старый контейнер (если есть)
+	exec.Command("docker", "stop", "zigflow-worker").Run()
+	exec.Command("docker", "rm", "zigflow-worker").Run()
+
+	workerCmd = exec.Command(
+		"docker",
+		"run",
+		"--rm",
+		"--name", "zigflow-worker",
+		"--network", "local-temporal-network",
+		"-v", fmt.Sprintf("%s:/app/workflows", workflowDir),
+		"ghcr.io/zigflow/zigflow",
+		"run",
+		"--file", "",
+		"--dir", "/app/workflows",
+		"--temporal-address", "temporal:7233",
+	)
 
 	workerCmd.Stdout = os.Stdout
 	workerCmd.Stderr = os.Stderr
 
-	// Передаем адрес локального Temporal
-	workerCmd.Env = append(os.Environ(), "TEMPORAL_ADDRESS=127.0.0.1:7233")
-
 	if err := workerCmd.Start(); err != nil {
-		fmt.Printf("❌ Ошибка старта воркера: %v\n", err)
-	} else {
-		fmt.Println("🚀 Воркер Zigflow успешно запущен и готов к работе!")
+		fmt.Printf("❌ Ошибка запуска Zigflow: %v\n", err)
+		return
 	}
+
+	go func() {
+		if err := workerCmd.Wait(); err != nil {
+			fmt.Printf("Zigflow завершился: %v\n", err)
+		}
+	}()
+
+	fmt.Println("🚀 Zigflow Worker успешно запущен")
 }
 
 func getAllWorkflowsHandler(w http.ResponseWriter, r *http.Request) {
