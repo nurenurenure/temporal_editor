@@ -296,6 +296,20 @@ func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBytes)
 }
 
+func enableCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*") // В проде лучше указать конкретный домен
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	// Инициализируем базу данных
 	connStr := "host=localhost port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
@@ -324,9 +338,8 @@ func main() {
 	mux.HandleFunc("GET /api/workflows", getAllWorkflowsHandler)
 	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
 
-	//Запуск HTTP сервера
 	fmt.Println("Сервер запущен на http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)
 	}
 }
