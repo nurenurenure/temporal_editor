@@ -1,0 +1,13 @@
+document:
+    dsl: 1.0.0
+    taskQueue: zigflow
+    workflowType: custom-wf-005241f0-30dd-46d6-b817-e55f837fca40
+    version: 0.0.1
+    title: Fetch User Profile
+    summary: Запрашивает данные пользователя по API
+do:
+    - get_user_data:
+        call: http
+        with:
+            endpoint: https://jsonplaceholder.typicode.com/users/1
+            method: get

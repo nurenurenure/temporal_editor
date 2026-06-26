@@ -7,6 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"go.temporal.io/sdk/client"
@@ -18,6 +21,60 @@ import (
 )
 
 var temporalClient client.Client
+
+var (
+	workerCmd *exec.Cmd
+	mu        sync.Mutex
+)
+
+func restartZigflowWorker() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	// останавливаем старый воркер, если он запущен
+	if workerCmd != nil && workerCmd.Process != nil {
+		fmt.Println("🔄 Обнаружен новый воркфлоу! Перезапускаем воркер Zigflow...")
+
+		// Посылаем Ctrl+C
+		_ = workerCmd.Process.Signal(os.Interrupt)
+
+		// Ждем максимум 2 секунды, пока он закроет соединения
+		done := make(chan error, 1)
+		go func() {
+			_, err := workerCmd.Process.Wait()
+			done <- err
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = workerCmd.Process.Kill()
+		}
+	}
+
+	// Получаем путь к домашней директории
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("❌ Ошибка получения домашней директории: %v\n", err)
+		return
+	}
+	zigflowPath := filepath.Join(homeDir, "go", "bin", "zigflow")
+
+	// 2. Запускаем воркер заново
+	workerCmd = exec.Command(zigflowPath, "run", "--dir", "./workflows")
+
+	workerCmd.Stdout = os.Stdout
+	workerCmd.Stderr = os.Stderr
+
+	// Передаем адрес локального Temporal
+	workerCmd.Env = append(os.Environ(), "TEMPORAL_ADDRESS=127.0.0.1:7233")
+
+	if err := workerCmd.Start(); err != nil {
+		fmt.Printf("❌ Ошибка старта воркера: %v\n", err)
+	} else {
+		fmt.Println("🚀 Воркер Zigflow успешно запущен и готов к работе!")
+	}
+}
 
 func getAllWorkflowsHandler(w http.ResponseWriter, r *http.Request) {
 	workflows, err := database.GetAllWorkflows()
@@ -111,7 +168,7 @@ func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:        "wf-" + id + "-" + fmt.Sprint(time.Now().Unix()), // Добавим timestamp для уникальности
+		ID:        "wf-" + id + "-" + fmt.Sprint(time.Now().Unix()),
 		TaskQueue: "zigflow",
 	}
 
@@ -126,7 +183,7 @@ func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		context.Background(),
 		workflowOptions,
 		workflowType,
-		inputData, // <--- ЭТО СТАНЕТ $input внутри YAML
+		inputData,
 	)
 
 	if err != nil {
@@ -204,6 +261,8 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		"yaml_file": yamlPath,
 		"status":    "created",
 	})
+	go restartZigflowWorker()
+
 }
 
 func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +315,7 @@ func main() {
 	defer c.Close() // Закроем соединение при завершении работы программы
 	temporalClient = c
 	fmt.Println("Успешное подключение к Temporal!")
+	go restartZigflowWorker()
 
 	//Настройка маршрутов
 	mux := http.NewServeMux()

@@ -1,0 +1,11 @@
+document:
+    dsl: 1.0.0
+    taskQueue: zigflow
+    workflowType: custom-wf-0b7b2365-176d-4986-9195-185c6acf263e
+    version: 0.0.1
+    title: Wait Workflow
+    summary: Тестовый воркфлоу с паузой в 5 секунд
+do:
+    - wait_5_sec:
+        wait:
+            seconds: 5

@@ -1,6 +1,7 @@
 networks:
   local-temporal-network:
     driver: bridge
+    name: local-temporal-network
 
 services:
   postgresql:
