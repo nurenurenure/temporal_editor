@@ -15,7 +15,8 @@ const defaultTemplates = {
   set: '{\n  "set": {\n    "message": "Hello from Ziggy"\n  }\n}',
   wait: '{\n  "wait": {\n    "seconds": 2\n  }\n}',
   switch: '{\n  "switch": [\n    {\n      "electronic": {\n        "when": "${ $input.orderType == \'electronic\' }",\n        "then": "processElectronicOrder"\n      }\n    },\n    {\n      "default": {\n        "then": "handleUnknownOrderType"\n      }\n    }\n  ]\n}',
-  call: '{\n  "do": [\n    {\n      "myApiCall": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/posts"\n        }\n      }\n    }\n  ]\n}'
+  call: '{\n  "do": [\n    {\n      "myApiCall": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/posts"\n        }\n      }\n    }\n  ]\n}',
+  for: '{\n  "for": {\n    "each": "item",\n    "in": "${ $input.data }",\n    "at": "index"\n  },\n  "do": [\n    {\n      "setData": {\n        "set": {\n          "userId": "${ $data.item.userId }",\n          "loop_index": "${ $data.index }",\n          "status": "processed_by_loop"\n        }\n      }\n    },\n    {\n      "wait": {\n        "wait": {\n          "seconds": 1\n        }\n      }\n    }\n  ]\n}'
 };
 
 const initialNodes = [
@@ -261,14 +262,49 @@ export default function WorkflowEditor() {
             <option value="wait">wait (Ожидание)</option>
             <option value="switch">switch (Ветвление)</option>
             <option value="call">call (Вызов саб-воркфлоу)</option>
+            <option value="for">for (Цикл по массиву)</option>
           </select>
 
-          <label style={{ marginTop: '15px', fontWeight: 'bold' }}>Параметры (JSON):</label>
-          <textarea 
-            value={selectedNode.data.body} 
-            onChange={(e) => updateNodeData('body', e.target.value)}
-            style={{ width: '100%', height: '350px', padding: '10px', marginTop: '5px', fontFamily: 'monospace', resize: 'vertical' }}
-          />
+          <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
+  {selectedNode.data.type === 'wait' && (
+    <div>
+      <label>Секунды:</label>
+      <input 
+        type="number"
+        value={JSON.parse(selectedNode.data.body).wait.seconds || 0}
+        onChange={(e) => {
+          const val = parseInt(e.target.value);
+          updateNodeData('body', JSON.stringify({ wait: { seconds: val } }, null, 2));
+        }}
+        style={{ width: '100%', padding: '5px' }}
+      />
+    </div>
+  )}
+
+  {selectedNode.data.type === 'set' && (
+    <div>
+      <label>Сообщение (message):</label>
+      <input 
+        type="text"
+        value={JSON.parse(selectedNode.data.body).set.message || ''}
+        onChange={(e) => {
+          const val = e.target.value;
+          updateNodeData('body', JSON.stringify({ set: { message: val } }, null, 2));
+        }}
+        style={{ width: '100%', padding: '5px' }}
+      />
+    </div>
+  )}
+
+  {/* Если выбран тип, для которого мы еще не сделали форму, оставляем JSON */}
+  {['switch', 'call', 'for'].includes(selectedNode.data.type) && (
+    <textarea 
+      value={selectedNode.data.body} 
+      onChange={(e) => updateNodeData('body', e.target.value)}
+      style={{ width: '100%', height: '200px', marginTop: '5px' }}
+    />
+  )}
+</div>
         </div>
       )}
     </div>

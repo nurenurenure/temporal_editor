@@ -1,17 +1,17 @@
 document:
     dsl: 1.0.0
     taskQueue: zigflow
-    workflowType: custom-wf-ae12b021-e8bd-4bb6-98e2-0aa9b8015821
+    workflowType: custom-wf-5d106861-12ea-498f-b862-a9c5b26d9064
     version: 0.0.1
-    title: Switch Testing Workflow
+    title: test1
     summary: UI Generated
 do:
-    - node1:
+    - meow:
         set:
             message: Hello from Ziggy
-    - step_780:
+    - timer:
         wait:
-            seconds: 2
-    - step4:
+            seconds: 4
+    - hrllo:
         set:
             message: Bye from Ziggy
