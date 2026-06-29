@@ -15,11 +15,15 @@ const defaultTemplates = {
   set: '{\n  "set": {\n    "message": "Hello from Ziggy"\n  }\n}',
   wait: '{\n  "wait": {\n    "seconds": 2\n  }\n}',
   switch: '{\n  "switch": [\n    {\n      "electronic": {\n        "when": "${ $input.orderType == \'electronic\' }",\n        "then": "processElectronicOrder"\n      }\n    },\n    {\n      "default": {\n        "then": "handleUnknownOrderType"\n      }\n    }\n  ]\n}',
-  call: '{\n  "do": [\n    {\n      "myApiCall": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/posts"\n        }\n      }\n    }\n  ]\n}',
   for: '{\n  "for": {\n    "each": "item",\n    "in": "${ $input.data }",\n    "at": "index"\n  },\n  "do": [\n    {\n      "setData": {\n        "set": {\n          "userId": "${ $data.item.userId }",\n          "loop_index": "${ $data.index }",\n          "status": "processed_by_loop"\n        }\n      }\n    },\n    {\n      "wait": {\n        "wait": {\n          "seconds": 1\n        }\n      }\n    }\n  ]\n}',
 parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "wait": {\n            "seconds": 5\n          }\n        }\n      },\n      {\n        "branch_2_wait": {\n          "wait": {\n            "seconds": 10\n          }\n        }\n      }\n    ]\n  }\n}',
   
-  tryCatch: '{\n  "try": [\n    {\n      "getUser": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n        }\n      }\n    }\n  ],\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}'
+  tryCatch: '{\n  "try": [\n    {\n      "getUser": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n        }\n      }\n    }\n  ],\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
+  call_http: '{\n  "do": [\n    {\n      "myHttpCall": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/posts/1"\n        }\n      }\n    }\n  ]\n}',
+
+  call_activity: '{\n  "do": [\n    {\n      "myNativeActivity": {\n        "call": "activity",\n        "with": {\n          "name": "ProcessPaymentActivity",\n          "input": {\n            "amount": "${ $input.amount }",\n            "currency": "USD"\n          }\n        }\n      }\n    }\n  ]\n}',
+
+  call_grpc: '{\n  "do": [\n    {\n      "myGrpcCall": {\n        "call": "grpc",\n        "with": {\n          "address": "user-service:50051",\n          "service": "users.UserService",\n          "method": "GetUserProfile",\n          "payload": {\n            "user_id": "${ $input.userId }"\n          }\n        }\n      }\n    }\n  ]\n}'
 };
 
 const initialNodes = [
@@ -267,10 +271,12 @@ export default function WorkflowEditor() {
             <option value="set">set (Присвоение)</option>
             <option value="wait">wait (Ожидание)</option>
             <option value="switch">switch (Ветвление)</option>
-            <option value="call">call (Вызов саб-воркфлоу)</option>
             <option value="for">for (Цикл по массиву)</option>
             <option value="parallel">parallel (Параллельные ветки)</option>
             <option value="tryCatch">try/catch (Обработка ошибок)</option>
+            <option value="call_http">call: HTTP (Внешний REST API)</option>
+            <option value="call_activity">call: Activity (Код на воркере)</option>
+            <option value="call_grpc">call: gRPC (Микросервисы)</option>
           </select>
 
           <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
@@ -420,9 +426,9 @@ export default function WorkflowEditor() {
 )}
 
 {/* Остальные типы, для которых еще нет формы */}
-{['call', 'for', 'parallel', 'tryCatch'].includes(selectedNode.data.type) && (
+{['for', 'parallel', 'tryCatch', 'call_http', 'call_activity', 'call_grpc'].includes(selectedNode.data.type) && (
   <div style={{ marginTop: '15px' }}>
-    <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация (вложенные шаги):</label>
+    <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация шага:</label>
     <textarea 
       value={selectedNode.data.body} 
       onChange={(e) => updateNodeData('body', e.target.value)}
