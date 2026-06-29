@@ -8,6 +8,7 @@ import ReactFlow, {
   Panel
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { useReactFlow } from 'reactflow';
 
 const getId = () => `node_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -25,13 +26,20 @@ parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": 
 
   call_grpc: '{\n  "do": [\n    {\n      "myGrpcCall": {\n        "call": "grpc",\n        "with": {\n          "address": "user-service:50051",\n          "service": "users.UserService",\n          "method": "GetUserProfile",\n          "payload": {\n            "user_id": "${ $input.userId }"\n          }\n        }\n      }\n    }\n  ]\n}'
 };
-
+const nodeTypes = {
+  workflow: WorkflowNode
+};
 const initialNodes = [
-  { 
-    id: 'start', 
-    position: { x: 250, y: 50 }, 
-    data: { stepName: 'switcher', type: 'switch', body: defaultTemplates['switch'] } 
+  {
+  id: 'start',
+  type: 'workflow',
+  position: { x: 250, y: 50 },
+  data: {
+    stepName: 'switcher',
+    type: 'switch',
+    body: defaultTemplates['switch']
   }
+}
 ];
 
 export default function WorkflowEditor() {
@@ -58,10 +66,15 @@ export default function WorkflowEditor() {
       const newX = lastNode ? lastNode.position.x + (Math.random() * 100 - 50) : 250; 
 
       const newNode = {
-        id: getId(),
-        position: { x: newX, y: newY },
-        data: { stepName: `step_${Math.floor(Math.random() * 1000)}`, type: 'call', body: defaultTemplates['call'] }
-      };
+    id: getId(),
+    type: "workflow",
+    position: { x: newX, y: newY },
+    data: {
+        stepName: `step_${Math.floor(Math.random()*1000)}`,
+        type: "call_http",
+        body: defaultTemplates["call_http"]
+    }
+};
       return nds.concat(newNode);
     });
   };
@@ -188,14 +201,28 @@ export default function WorkflowEditor() {
   };
 
   return (
-    <div style={{ width: '100vw', height: '100%', display: 'flex' }}>
-      <div style={{ flexGrow: 1, position: 'relative' }}>
+    <div
+  style={{
+    width: '100%',
+    height: '100vh',
+    display: 'flex',
+    overflow: 'hidden'
+  }}
+>
+  <div
+  style={{
+      flex: 1,
+      minWidth: 0,
+      position: 'relative'
+  }}
+>
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
+            nodes={nodes}
+    edges={edges}
+    nodeTypes={nodeTypes}
+    onNodesChange={onNodesChange}
+    onEdgesChange={onEdgesChange}
+    onConnect={onConnect}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           fitView
@@ -248,7 +275,9 @@ export default function WorkflowEditor() {
       </div>
 
       {selectedNode && (
-        <div style={{ width: '350px', background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column',
+        <div style={{ width: '30%',
+minWidth: 300,
+maxWidth: 420, background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column',
             height: '100vh',         // Фиксируем высоту панели по высоте экрана
     overflowY: 'auto'
          }}>
@@ -439,6 +468,60 @@ export default function WorkflowEditor() {
 </div>
         </div>
       )}
+    </div>
+  );
+}
+
+import { Handle, Position } from "reactflow";
+
+function WorkflowNode({ data }) {
+  const colors = {
+    set: "#4caf50",
+    wait: "#ff9800",
+    switch: "#9c27b0",
+    for: "#2196f3",
+    parallel: "#00bcd4",
+    tryCatch: "#f44336",
+    call_http: "#3f51b5",
+    call_activity: "#607d8b",
+    call_grpc: "#009688"
+  };
+
+  return (
+    <div
+      style={{
+        minWidth: 180,
+        border: "1px solid #bbb",
+        borderRadius: 8,
+        background: "#fff",
+        overflow: "hidden",
+        boxShadow: "0 2px 5px rgba(0,0,0,.15)"
+      }}
+    >
+      <Handle type="target" position={Position.Top} />
+
+      <div
+        style={{
+          background: colors[data.type] || "#666",
+          color: "white",
+          padding: "6px 10px",
+          fontWeight: "bold",
+          fontSize: 13
+        }}
+      >
+        {data.type}
+      </div>
+
+      <div
+        style={{
+          padding: 10,
+          fontSize: 14
+        }}
+      >
+        {data.stepName}
+      </div>
+
+      <Handle type="source" position={Position.Bottom} />
     </div>
   );
 }
