@@ -241,7 +241,10 @@ export default function WorkflowEditor() {
       </div>
 
       {selectedNode && (
-        <div style={{ width: '350px', background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '350px', background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column',
+            height: '100vh',         // Фиксируем высоту панели по высоте экрана
+    overflowY: 'auto'
+         }}>
           <h3>Настройки шага</h3>
           
           <label style={{ fontWeight: 'bold' }}>Имя шага (ключ):</label>
@@ -266,6 +269,7 @@ export default function WorkflowEditor() {
           </select>
 
           <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
+
   {selectedNode.data.type === 'wait' && (
     <div>
       <label>Секунды:</label>
@@ -281,29 +285,143 @@ export default function WorkflowEditor() {
     </div>
   )}
 
-  {selectedNode.data.type === 'set' && (
-    <div>
-      <label>Сообщение (message):</label>
+{selectedNode.data.type === 'set' && (
+  <div>
+    <label style={{ fontWeight: 'bold' }}>Данные для установки:</label>
+    {Object.entries(JSON.parse(selectedNode.data.body).set || {}).map(([key, value], index) => (
+      <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+        <input 
+          value={key} 
+          placeholder="Ключ"
+          onChange={(e) => {
+            const newKey = e.target.value;
+            const currentData = JSON.parse(selectedNode.data.body).set;
+            
+            // ПРОВЕРКА НА ДУБЛИКАТЫ:
+            if (newKey !== key && currentData.hasOwnProperty(newKey)) {
+              alert("Ключ с таким именем уже существует!");
+              return;
+            }
+
+            const newData = { ...currentData };
+            delete newData[key];
+            newData[newKey] = value;
+            updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+          }}
+          style={{ width: '40%', padding: '4px' }}
+        />
+        <input 
+          value={value} 
+          placeholder="Значение"
+          onChange={(e) => {
+            const currentData = JSON.parse(selectedNode.data.body).set;
+            const newData = { ...currentData, [key]: e.target.value };
+            updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+          }}
+          style={{ width: '60%', padding: '4px' }}
+        />
+      </div>
+    ))}
+    <button 
+      onClick={() => {
+        const currentData = JSON.parse(selectedNode.data.body).set;
+        const newKeyName = "new_field";
+        
+        // Автоматически находим свободное имя, чтобы не создавать дубликат
+        if (currentData.hasOwnProperty(newKeyName)) {
+           alert("Сначала переименуйте существующее поле!");
+           return;
+        }
+
+        updateNodeData('body', JSON.stringify({ set: { ...currentData, [newKeyName]: "значение" } }, null, 2));
+      }}
+      style={{ marginTop: '10px', width: '100%' }}
+    >
+      + Добавить поле
+    </button>
+  </div>
+)}
+{selectedNode.data.type === 'switch' && (
+  <div>
+    <label style={{ fontWeight: 'bold' }}>Условия ветвления:</label>
+    {/* Заменяем блок отображения веток на этот вариант */}
+{JSON.parse(selectedNode.data.body).switch.map((item, index) => {
+  const type = item.default ? 'default' : Object.keys(item)[0];
+  const condition = item[type].when || '';
+  const target = item[type].then;
+
+  return (
+    <div key={index} style={{ background: '#f0f0f0', padding: '8px', marginTop: '10px', borderRadius: '4px' }}>
+      
+      {/* Поле для переименования ключа ветки */}
+      <label style={{ fontSize: '11px', fontWeight: 'bold' }}>Имя ветки (ключ):</label>
       <input 
-        type="text"
-        value={JSON.parse(selectedNode.data.body).set.message || ''}
+        value={type}
+        readOnly={type === 'default'} // default нельзя переименовывать
         onChange={(e) => {
-          const val = e.target.value;
-          updateNodeData('body', JSON.stringify({ set: { message: val } }, null, 2));
+          const newKey = e.target.value;
+          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+          // Создаем новую структуру объекта с новым ключом
+          const branchData = newSwitch[index][type];
+          newSwitch[index] = { [newKey]: branchData };
+          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
         }}
-        style={{ width: '100%', padding: '5px' }}
+        style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
+      />
+      
+      {type !== 'default' && (
+        <>
+          <label style={{ fontSize: '11px' }}>Условие (when):</label>
+          <input 
+            value={condition}
+            onChange={(e) => {
+              const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+              newSwitch[index][type].when = e.target.value;
+              updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+            }}
+            style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
+          />
+        </>
+      )}
+
+      <label style={{ fontSize: '11px' }}>Перейти к (then):</label>
+      <input 
+        value={target}
+        onChange={(e) => {
+          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+          newSwitch[index][type].then = e.target.value;
+          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+        }}
+        style={{ width: '100%', padding: '4px' }}
       />
     </div>
-  )}
+  );
+})}
+    <button 
+      onClick={() => {
+        const currentSwitch = JSON.parse(selectedNode.data.body).switch;
+        const newCondition = { 
+          "new_type": { "when": "${ $input.val == 'new' }", "then": "nextStep" } 
+        };
+        // Вставляем перед default (предпоследним элементом)
+        const newSwitch = [...currentSwitch.slice(0, -1), newCondition, currentSwitch[currentSwitch.length - 1]];
+        updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+      }}
+      style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#e0e0e0', border: 'none', cursor: 'pointer' }}
+    >
+      + Добавить условие
+    </button>
+  </div>
+)}
 
-  {/* Если выбран тип, для которого мы еще не сделали форму, оставляем JSON */}
-  {['switch', 'call', 'for'].includes(selectedNode.data.type) && (
-    <textarea 
-      value={selectedNode.data.body} 
-      onChange={(e) => updateNodeData('body', e.target.value)}
-      style={{ width: '100%', height: '200px', marginTop: '5px' }}
-    />
-  )}
+{/* Остальные типы (call, for), для которых еще нет формы */}
+{['call', 'for'].includes(selectedNode.data.type) && (
+  <textarea 
+    value={selectedNode.data.body} 
+    onChange={(e) => updateNodeData('body', e.target.value)}
+    style={{ width: '100%', height: '200px', marginTop: '15px', fontFamily: 'monospace' }}
+  />
+)}
 </div>
         </div>
       )}
