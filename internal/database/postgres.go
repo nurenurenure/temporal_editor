@@ -63,7 +63,7 @@ func SaveWorkflow(wf *models.Workflow) error {
 // GetWorkflowByID получает воркфлоу из БД по его ID
 func GetWorkflowByID(id string) (*models.Workflow, error) {
 	var wf models.Workflow
-	var stepsJSON []byte //JSONB из базы
+	var stepsJSON []byte
 
 	query := `
 		SELECT id, name, description, config_json 

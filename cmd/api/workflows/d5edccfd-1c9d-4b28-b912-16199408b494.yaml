@@ -1,0 +1,29 @@
+document:
+    dsl: 1.0.0
+    taskQueue: zigflow
+    workflowType: custom-wf-d5edccfd-1c9d-4b28-b912-16199408b494
+    version: 0.0.1
+    title: Switch Testing Workflow
+    summary: Testing branches
+do:
+    - processElectronicOrder:
+        do:
+            - myApiCall:
+                call: http
+                with:
+                    endpoint: https://jsonplaceholder.typicode.com/posts
+                    method: get
+    - switcher:
+        switch:
+            - electronic:
+                then: processElectronicOrder
+                when: ${ $input.orderType == 'electronic' }
+            - default:
+                then: handleUnknownOrderType
+    - handleUnknownOrderType:
+        do:
+            - myApiCall:
+                call: http
+                with:
+                    endpoint: https://jsonplaceholder.typicode.com/posts
+                    method: get
