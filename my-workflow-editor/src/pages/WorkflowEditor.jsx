@@ -8,7 +8,6 @@ import ReactFlow, {
   Panel
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { useReactFlow } from 'reactflow';
 
 const getId = () => `node_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -17,43 +16,43 @@ const defaultTemplates = {
   wait: '{\n  "wait": {\n    "seconds": 2\n  }\n}',
   switch: '{\n  "switch": [\n    {\n      "electronic": {\n        "when": "${ $input.orderType == \'electronic\' }",\n        "then": "processElectronicOrder"\n      }\n    },\n    {\n      "default": {\n        "then": "handleUnknownOrderType"\n      }\n    }\n  ]\n}',
   for: '{\n  "for": {\n    "each": "item",\n    "in": "${ $input.data }",\n    "at": "index"\n  },\n  "do": [\n    {\n      "setData": {\n        "set": {\n          "userId": "${ $data.item.userId }",\n          "loop_index": "${ $data.index }",\n          "status": "processed_by_loop"\n        }\n      }\n    },\n    {\n      "wait": {\n        "wait": {\n          "seconds": 1\n        }\n      }\n    }\n  ]\n}',
-parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "wait": {\n            "seconds": 5\n          }\n        }\n      },\n      {\n        "branch_2_wait": {\n          "wait": {\n            "seconds": 10\n          }\n        }\n      }\n    ]\n  }\n}',
+  parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "wait": {\n            "seconds": 5\n          }\n        }\n      },\n      {\n        "branch_2_wait": {\n          "wait": {\n            "seconds": 10\n          }\n        }\n      }\n    ]\n  }\n}',
   
-tryCatch: '{\n  "try": {\n    "do": [\n      {\n        "getUser": {\n          "call": "http",\n          "with": {\n            "method": "get",\n            "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n          }\n        }\n      }\n    ]\n  },\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
+  tryCatch: '{\n  "try": {\n    "do": [\n      {\n        "getUser": {\n          "call": "http",\n          "with": {\n            "method": "get",\n            "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n          }\n        }\n      }\n    ]\n  },\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
   call_http: '{\n  "call": "http",\n  "with": {\n    "method": "get",\n    "endpoint": "https://jsonplaceholder.typicode.com/posts/1"\n  }\n}',
 
   call_activity: '{\n  "call": "activity",\n  "with": {\n    "name": "ProcessPaymentActivity",\n    "input": {\n      "amount": "${ $input.amount }",\n      "currency": "USD"\n    }\n  }\n}',
 
   call_grpc: '{\n  "call": "grpc",\n  "with": {\n    "address": "user-service:50051",\n    "service": "users.UserService",\n    "method": "GetUserProfile",\n    "payload": {\n      "user_id": "${ $input.userId }"\n    }\n  }\n}'
 };
+
 const nodeTypes = {
   workflow: WorkflowNode
 };
+
 const initialNodes = [
   {
-  id: 'start',
-  type: 'workflow',
-  position: { x: 250, y: 50 },
-  data: {
-    stepName: 'switcher',
-    type: 'switch',
-    body: defaultTemplates['switch']
+    id: 'start',
+    type: 'workflow',
+    position: { x: 250, y: 50 },
+    data: {
+      stepName: 'switcher',
+      type: 'switch',
+      body: defaultTemplates['switch']
+    }
   }
-}
 ];
 
 export default function WorkflowEditor() {
   const [nodes, setNodes] = useState(initialNodes);
   const [edges, setEdges] = useState([]);
   
-  // Данные воркфлоу
   const [workflowName, setWorkflowName] = useState('Switch Testing Workflow');
   const [selectedNode, setSelectedNode] = useState(null);
   
-  // Состояния для запуска (Run)
-  const [workflowId, setWorkflowId] = useState(null); // ID сохраненного графа
+  const [workflowId, setWorkflowId] = useState(null);
   const [runPayload, setRunPayload] = useState('{\n  "data": [\n    {\n      "orderType": "electronic"\n    }\n  ]\n}');
-  const [runResult, setRunResult] = useState(null); // Результат запуска (ссылки)
+  const [runResult, setRunResult] = useState(null);
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
@@ -66,15 +65,15 @@ export default function WorkflowEditor() {
       const newX = lastNode ? lastNode.position.x + (Math.random() * 100 - 50) : 250; 
 
       const newNode = {
-    id: getId(),
-    type: "workflow",
-    position: { x: newX, y: newY },
-    data: {
-        stepName: `step_${Math.floor(Math.random()*1000)}`,
-        type: "call_http",
-        body: defaultTemplates["call_http"]
-    }
-};
+        id: getId(),
+        type: "workflow",
+        position: { x: newX, y: newY },
+        data: {
+          stepName: `step_${Math.floor(Math.random()*1000)}`,
+          type: "call_http",
+          body: defaultTemplates["call_http"]
+        }
+      };
       return nds.concat(newNode);
     });
   };
@@ -109,7 +108,7 @@ export default function WorkflowEditor() {
     setSelectedNode((prev) => ({ ...prev, data: { ...prev.data, type: newType, body: newBodyTemplate } }));
   };
 
-const getOrderedSteps = () => {
+  const getOrderedSteps = () => {
     if (nodes.length === 0) return [];
 
     const targetIds = new Set(edges.map((e) => e.target));
@@ -118,13 +117,12 @@ const getOrderedSteps = () => {
     if (startNodes.length === 0) throw new Error("Зацикленный граф!");
     const startNode = startNodes[0];
 
-    // Рекурсивная функция для сборки дерева вложенностей
-   const buildNativeSequence = (startNodeId, visited = new Set()) => {
+    const buildNativeSequence = (startNodeId, visited = new Set()) => {
       let currentId = startNodeId;
       const sequence = [];
 
       while (currentId) {
-        if (visited.has(currentId)) break; // Защита от бесконечного цикла
+        if (visited.has(currentId)) break;
         visited.add(currentId);
 
         const node = nodes.find(n => n.id === currentId);
@@ -133,11 +131,9 @@ const getOrderedSteps = () => {
         let stepBody = {};
 
         if (node.data?.type === 'parallel') {
-          // Ищем все стрелки, выходящие из форка (это наши ветки)
           const outEdges = edges.filter(e => e.source === currentId);
           const branches = outEdges.map((edge, index) => {
             return {
-              // Рекурсивно уходим внутрь каждой ветки
               [`branch_${index + 1}`]: {
                 do: buildNativeSequence(edge.target, new Set(visited))
               }
@@ -146,10 +142,9 @@ const getOrderedSteps = () => {
           
           stepBody = { fork: { branches } };
           sequence.push({ [node.data.stepName]: stepBody });
-          break; // В нашей логике форк забирает весь дальнейший поток в свои ветки
+          break;
         } 
         else if (node.data?.type === 'tryCatch') {
-          // Ищем конкретные стрелки по ID порта (try и catch)
           const tryEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'try');
           const catchEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'catch');
 
@@ -161,10 +156,9 @@ const getOrderedSteps = () => {
           };
           
           sequence.push({ [node.data.stepName]: stepBody });
-          break; // Ветки try/catch уходят в свои цепочки
+          break;
         }
         else {
-          // Обычный линейный узел (set, wait, call и т.д.)
           try {
             stepBody = JSON.parse(node.data.body || '{}');
           } catch (e) {
@@ -172,7 +166,6 @@ const getOrderedSteps = () => {
           }
           sequence.push({ [node.data.stepName]: stepBody });
 
-          // Идем к следующему узлу по прямой
           const outEdges = edges.filter(e => e.source === currentId);
           currentId = outEdges.length > 0 ? outEdges[0].target : null;
         }
@@ -182,7 +175,6 @@ const getOrderedSteps = () => {
 
     const nativeSeq = buildNativeSequence(startNode.id);
     
-    // Преобразуем верхний уровень массива в формат для API [{ name: "x", body: {} }]
     return nativeSeq.map(item => {
       const name = Object.keys(item)[0];
       return { name: name, body: item[name] };
@@ -194,8 +186,6 @@ const getOrderedSteps = () => {
       const steps = getOrderedSteps();
       const payload = { name: workflowName, description: "UI Generated", steps };
       
-      // Здесь в будущем добавим логику: если это редактирование, то делаем PUT запрос.
-      // Пока оставляем POST для создания.
       const response = await fetch('http://localhost:8080/api/workflows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -246,28 +236,15 @@ const getOrderedSteps = () => {
   };
 
   return (
-    <div
-  style={{
-    width: '100%',
-    height: '100vh',
-    display: 'flex',
-    overflow: 'hidden'
-  }}
->
-  <div
-  style={{
-      flex: 1,
-      minWidth: 0,
-      position: 'relative'
-  }}
->
+    <div style={{ width: '100%', height: '100vh', display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         <ReactFlow
-            nodes={nodes}
-    edges={edges}
-    nodeTypes={nodeTypes}
-    onNodesChange={onNodesChange}
-    onEdgesChange={onEdgesChange}
-    onConnect={onConnect}
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           fitView
@@ -320,12 +297,7 @@ const getOrderedSteps = () => {
       </div>
 
       {selectedNode && (
-        <div style={{ width: '30%',
-minWidth: 300,
-maxWidth: 420, background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column',
-            height: '100vh',         // Фиксируем высоту панели по высоте экрана
-    overflowY: 'auto'
-         }}>
+        <div style={{ width: '30%', minWidth: 300, maxWidth: 420, background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20px', display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto' }}>
           <h3>Настройки шага</h3>
           
           <label style={{ fontWeight: 'bold' }}>Имя шага (ключ):</label>
@@ -355,171 +327,365 @@ maxWidth: 420, background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20
 
           <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
 
-  {selectedNode.data.type === 'wait' && (
-    <div>
-      <label>Секунды:</label>
-      <input 
-        type="number"
-        value={JSON.parse(selectedNode.data.body).wait.seconds || 0}
-        onChange={(e) => {
-          const val = parseInt(e.target.value);
-          updateNodeData('body', JSON.stringify({ wait: { seconds: val } }, null, 2));
-        }}
-        style={{ width: '100%', padding: '5px' }}
-      />
-    </div>
-  )}
+            {selectedNode.data.type === 'wait' && (
+              <div>
+                <label>Секунды:</label>
+                <input 
+                  type="number"
+                  value={JSON.parse(selectedNode.data.body || '{"wait":{"seconds":0}}').wait?.seconds || 0}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || 0;
+                    updateNodeData('body', JSON.stringify({ wait: { seconds: val } }, null, 2));
+                  }}
+                  style={{ width: '100%', padding: '5px' }}
+                />
+              </div>
+            )}
 
-{selectedNode.data.type === 'set' && (
-  <div>
-    <label style={{ fontWeight: 'bold' }}>Данные для установки:</label>
-    {Object.entries(JSON.parse(selectedNode.data.body).set || {}).map(([key, value], index) => (
-      <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
-        <input 
-          value={key} 
-          placeholder="Ключ"
-          onChange={(e) => {
-            const newKey = e.target.value;
-            const currentData = JSON.parse(selectedNode.data.body).set;
-            
-            // ПРОВЕРКА НА ДУБЛИКАТЫ:
-            if (newKey !== key && currentData.hasOwnProperty(newKey)) {
-              alert("Ключ с таким именем уже существует!");
-              return;
-            }
+            {selectedNode.data.type === 'set' && (
+              <div>
+                <label style={{ fontWeight: 'bold' }}>Данные для установки:</label>
+                {Object.entries(JSON.parse(selectedNode.data.body || '{"set":{}}').set || {}).map(([key, value], index) => (
+                  <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+                    <input 
+                      value={key} 
+                      placeholder="Ключ"
+                      onChange={(e) => {
+                        const newKey = e.target.value;
+                        const currentData = JSON.parse(selectedNode.data.body).set;
+                        if (newKey !== key && currentData.hasOwnProperty(newKey)) {
+                          alert("Ключ с таким именем уже существует!");
+                          return;
+                        }
+                        const newData = { ...currentData };
+                        delete newData[key];
+                        newData[newKey] = value;
+                        updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+                      }}
+                      style={{ width: '40%', padding: '4px' }}
+                    />
+                    <input 
+                      value={value} 
+                      placeholder="Значение"
+                      onChange={(e) => {
+                        const currentData = JSON.parse(selectedNode.data.body).set;
+                        const newData = { ...currentData, [key]: e.target.value };
+                        updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+                      }}
+                      style={{ width: '60%', padding: '4px' }}
+                    />
+                  </div>
+                ))}
+                <button 
+                  onClick={() => {
+                    const currentData = JSON.parse(selectedNode.data.body || '{"set":{}}').set || {};
+                    const newKeyName = "new_field";
+                    if (currentData.hasOwnProperty(newKeyName)) {
+                       alert("Сначала переименуйте существующее поле!");
+                       return;
+                    }
+                    updateNodeData('body', JSON.stringify({ set: { ...currentData, [newKeyName]: "значение" } }, null, 2));
+                  }}
+                  style={{ marginTop: '10px', width: '100%' }}
+                >
+                  + Добавить поле
+                </button>
+              </div>
+            )}
 
-            const newData = { ...currentData };
-            delete newData[key];
-            newData[newKey] = value;
-            updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
-          }}
-          style={{ width: '40%', padding: '4px' }}
-        />
-        <input 
-          value={value} 
-          placeholder="Значение"
-          onChange={(e) => {
-            const currentData = JSON.parse(selectedNode.data.body).set;
-            const newData = { ...currentData, [key]: e.target.value };
-            updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
-          }}
-          style={{ width: '60%', padding: '4px' }}
-        />
-      </div>
-    ))}
-    <button 
-      onClick={() => {
-        const currentData = JSON.parse(selectedNode.data.body).set;
-        const newKeyName = "new_field";
-        
-        // Автоматически находим свободное имя, чтобы не создавать дубликат
-        if (currentData.hasOwnProperty(newKeyName)) {
-           alert("Сначала переименуйте существующее поле!");
-           return;
-        }
+            {selectedNode.data.type === 'switch' && (
+              <div>
+                <label style={{ fontWeight: 'bold' }}>Условия ветвления:</label>
+                {JSON.parse(selectedNode.data.body || '{"switch":[]}').switch.map((item, index) => {
+                  const type = item.default ? 'default' : Object.keys(item)[0];
+                  const condition = item[type].when || '';
+                  const target = item[type].then;
 
-        updateNodeData('body', JSON.stringify({ set: { ...currentData, [newKeyName]: "значение" } }, null, 2));
-      }}
-      style={{ marginTop: '10px', width: '100%' }}
-    >
-      + Добавить поле
-    </button>
-  </div>
-)}
-{selectedNode.data.type === 'switch' && (
-  <div>
-    <label style={{ fontWeight: 'bold' }}>Условия ветвления:</label>
-    {/* Заменяем блок отображения веток на этот вариант */}
-{JSON.parse(selectedNode.data.body).switch.map((item, index) => {
-  const type = item.default ? 'default' : Object.keys(item)[0];
-  const condition = item[type].when || '';
-  const target = item[type].then;
+                  return (
+                    <div key={index} style={{ background: '#f0f0f0', padding: '8px', marginTop: '10px', borderRadius: '4px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 'bold' }}>Имя ветки (ключ):</label>
+                      <input 
+                        value={type}
+                        readOnly={type === 'default'} 
+                        onChange={(e) => {
+                          const newKey = e.target.value;
+                          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+                          const branchData = newSwitch[index][type];
+                          newSwitch[index] = { [newKey]: branchData };
+                          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                        }}
+                        style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
+                      />
+                      
+                      {type !== 'default' && (
+                        <>
+                          <label style={{ fontSize: '11px' }}>Условие (when):</label>
+                          <input 
+                            value={condition}
+                            onChange={(e) => {
+                              const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+                              newSwitch[index][type].when = e.target.value;
+                              updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                            }}
+                            style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
+                          />
+                        </>
+                      )}
 
-  return (
-    <div key={index} style={{ background: '#f0f0f0', padding: '8px', marginTop: '10px', borderRadius: '4px' }}>
-      
-      {/* Поле для переименования ключа ветки */}
-      <label style={{ fontSize: '11px', fontWeight: 'bold' }}>Имя ветки (ключ):</label>
-      <input 
-        value={type}
-        readOnly={type === 'default'} // default нельзя переименовывать
-        onChange={(e) => {
-          const newKey = e.target.value;
-          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-          // Создаем новую структуру объекта с новым ключом
-          const branchData = newSwitch[index][type];
-          newSwitch[index] = { [newKey]: branchData };
-          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
-        }}
-        style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
-      />
-      
-      {type !== 'default' && (
-        <>
-          <label style={{ fontSize: '11px' }}>Условие (when):</label>
-          <input 
-            value={condition}
-            onChange={(e) => {
-              const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-              newSwitch[index][type].when = e.target.value;
-              updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
-            }}
-            style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
-          />
-        </>
-      )}
+                      <label style={{ fontSize: '11px' }}>Перейти к (then):</label>
+                      <input 
+                        value={target}
+                        onChange={(e) => {
+                          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
+                          newSwitch[index][type].then = e.target.value;
+                          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                        }}
+                        style={{ width: '100%', padding: '4px' }}
+                      />
+                    </div>
+                  );
+                })}
+                <button 
+                  onClick={() => {
+                    const currentSwitch = JSON.parse(selectedNode.data.body).switch;
+                    const newCondition = { 
+                      "new_type": { "when": "${ $input.val == 'new' }", "then": "nextStep" } 
+                    };
+                    const newSwitch = [...currentSwitch.slice(0, -1), newCondition, currentSwitch[currentSwitch.length - 1]];
+                    updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                  }}
+                  style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#e0e0e0', border: 'none', cursor: 'pointer' }}
+                >
+                  + Добавить условие
+                </button>
+              </div>
+            )}
 
-      <label style={{ fontSize: '11px' }}>Перейти к (then):</label>
-      <input 
-        value={target}
-        onChange={(e) => {
-          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-          newSwitch[index][type].then = e.target.value;
-          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
-        }}
-        style={{ width: '100%', padding: '4px' }}
-      />
-    </div>
-  );
-})}
-    <button 
-      onClick={() => {
-        const currentSwitch = JSON.parse(selectedNode.data.body).switch;
-        const newCondition = { 
-          "new_type": { "when": "${ $input.val == 'new' }", "then": "nextStep" } 
-        };
-        // Вставляем перед default (предпоследним элементом)
-        const newSwitch = [...currentSwitch.slice(0, -1), newCondition, currentSwitch[currentSwitch.length - 1]];
-        updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
-      }}
-      style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#e0e0e0', border: 'none', cursor: 'pointer' }}
-    >
-      + Добавить условие
-    </button>
-  </div>
-)}
+            {/* 🌐 ИНТЕРФЕЙС ДЛЯ CALL HTTP */}
+            {selectedNode.data.type === 'call_http' && (() => {
+              let bodyObj = { call: "http", with: { method: "get", endpoint: "" } };
+              try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
+              const withData = bodyObj.with || {};
+              return (
+                <div>
+                  <label style={{ fontWeight: 'bold' }}>HTTP Метод:</label>
+                  <select
+                    value={withData.method || 'get'}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, method: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px' }}
+                  >
+                    <option value="get">GET</option>
+                    <option value="post">POST</option>
+                    <option value="put">PUT</option>
+                    <option value="delete">DELETE</option>
+                    <option value="patch">PATCH</option>
+                  </select>
 
-{/* Сообщение для визуальных блоков */}
-{['parallel', 'tryCatch'].includes(selectedNode.data.type) && (
-  <div style={{ marginTop: '15px', padding: '10px', background: '#e3f2fd', border: '1px solid #2196f3', borderRadius: '4px' }}>
-    <p style={{ fontSize: '12px', margin: 0, color: '#0d47a1' }}>
-      ℹ️ Конфигурация этого блока задается визуально.<br/><br/>
-      Подключите следующие шаги с помощью линий связи (edges) прямо на холсте.
-    </p>
-  </div>
-)}
+                  <label style={{ fontWeight: 'bold' }}>Эндпоинт (Endpoint URL):</label>
+                  <input
+                    type="text"
+                    value={withData.endpoint || ''}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, endpoint: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', boxSizing: 'border-box' }}
+                    placeholder="https://api.example.com/v1/data"
+                  />
+                </div>
+              );
+            })()}
 
-{['for', 'call_http', 'call_activity', 'call_grpc'].includes(selectedNode.data.type) && (
-  <div style={{ marginTop: '15px' }}>
-    <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация шага:</label>
-    <textarea 
-      value={selectedNode.data.body} 
-      onChange={(e) => updateNodeData('body', e.target.value)}
-      style={{ width: '100%', height: '280px', marginTop: '5px', fontFamily: 'monospace', fontSize: '11px', whiteSpace: 'pre' }}
-    />
-  </div>
-)}
-</div>
+            {/* ⚡ ИНТЕРФЕЙС ДЛЯ CALL ACTIVITY */}
+            {selectedNode.data.type === 'call_activity' && (() => {
+              let bodyObj = { call: "activity", with: { name: "", input: {} } };
+              try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
+              const withData = bodyObj.with || {};
+              const inputs = withData.input || {};
+              return (
+                <div>
+                  <label style={{ fontWeight: 'bold' }}>Название Активити (Name):</label>
+                  <input
+                    type="text"
+                    value={withData.name || ''}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, name: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+                    placeholder="ProcessPaymentActivity"
+                  />
+
+                  <label style={{ fontWeight: 'bold' }}>Параметры (Input):</label>
+                  {Object.entries(inputs).map(([key, value], index) => (
+                    <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+                      <input
+                        value={key}
+                        placeholder="Ключ"
+                        onChange={(e) => {
+                          const newKey = e.target.value;
+                          if (newKey !== key && inputs.hasOwnProperty(newKey)) {
+                            alert("Такой параметр уже добавлен!");
+                            return;
+                          }
+                          const newInput = { ...inputs };
+                          delete newInput[key];
+                          newInput[newKey] = value;
+                          const newBody = { ...bodyObj, with: { ...withData, input: newInput } };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        }}
+                        style={{ width: '40%', padding: '4px' }}
+                      />
+                      <input
+                        value={value}
+                        placeholder="Значение"
+                        onChange={(e) => {
+                          const newInput = { ...inputs, [key]: e.target.value };
+                          const newBody = { ...bodyObj, with: { ...withData, input: newInput } };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        }}
+                        style={{ width: '60%', padding: '4px' }}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const newKeyName = "new_param";
+                      if (inputs.hasOwnProperty(newKeyName)) {
+                        alert("Сначала переименуйте предыдущее добавленное поле!");
+                        return;
+                      }
+                      const newInput = { ...inputs, [newKeyName]: "значение" };
+                      const newBody = { ...bodyObj, with: { ...withData, input: newInput } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ marginTop: '10px', width: '100%', padding: '5px' }}
+                  >
+                    + Добавить параметр
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* 🧬 ИНТЕРФЕЙС ДЛЯ CALL GRPC */}
+            {selectedNode.data.type === 'call_grpc' && (() => {
+              let bodyObj = { call: "grpc", with: { address: "", service: "", method: "", payload: {} } };
+              try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
+              const withData = bodyObj.with || {};
+              const payload = withData.payload || {};
+              return (
+                <div>
+                  <label style={{ fontWeight: 'bold' }}>Адрес Хоста (Address):</label>
+                  <input
+                    type="text"
+                    value={withData.address || ''}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, address: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '10px', boxSizing: 'border-box' }}
+                    placeholder="user-service:50051"
+                  />
+
+                  <label style={{ fontWeight: 'bold' }}>Сервис (Service):</label>
+                  <input
+                    type="text"
+                    value={withData.service || ''}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, service: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '10px', boxSizing: 'border-box' }}
+                    placeholder="users.UserService"
+                  />
+
+                  <label style={{ fontWeight: 'bold' }}>Метод (Method):</label>
+                  <input
+                    type="text"
+                    value={withData.method || ''}
+                    onChange={(e) => {
+                      const newBody = { ...bodyObj, with: { ...withData, method: e.target.value } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+                    placeholder="GetUserProfile"
+                  />
+
+                  <label style={{ fontWeight: 'bold' }}>Пейлоад (Payload данные):</label>
+                  {Object.entries(payload).map(([key, value], index) => (
+                    <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+                      <input
+                        value={key}
+                        placeholder="Ключ"
+                        onChange={(e) => {
+                          const newKey = e.target.value;
+                          if (newKey !== key && payload.hasOwnProperty(newKey)) {
+                            alert("Поле с таким именем уже есть!");
+                            return;
+                          }
+                          const newPayload = { ...payload };
+                          delete newPayload[key];
+                          newPayload[newKey] = value;
+                          const newBody = { ...bodyObj, with: { ...withData, payload: newPayload } };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        }}
+                        style={{ width: '40%', padding: '4px' }}
+                      />
+                      <input
+                        value={value}
+                        placeholder="Значение"
+                        onChange={(e) => {
+                          const newPayload = { ...payload, [key]: e.target.value };
+                          const newBody = { ...bodyObj, with: { ...withData, payload: newPayload } };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        }}
+                        style={{ width: '60%', padding: '4px' }}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const newKeyName = "new_field";
+                      if (payload.hasOwnProperty(newKeyName)) {
+                        alert("Переименуйте текущее созданное поле перед добавлением!");
+                        return;
+                      }
+                      const newPayload = { ...payload, [newKeyName]: "значение" };
+                      const newBody = { ...bodyObj, with: { ...withData, payload: newPayload } };
+                      updateNodeData('body', JSON.stringify(newBody, null, 2));
+                    }}
+                    style={{ marginTop: '10px', width: '100%', padding: '5px' }}
+                  >
+                    + Добавить поле payload
+                  </button>
+                </div>
+              );
+            })()}
+
+            {['parallel', 'tryCatch'].includes(selectedNode.data.type) && (
+              <div style={{ marginTop: '15px', padding: '10px', background: '#e3f2fd', border: '1px solid #2196f3', borderRadius: '4px' }}>
+                <p style={{ fontSize: '12px', margin: 0, color: '#0d47a1' }}>
+                  ℹ️ Конфигурация этого блока задается визуально.<br/><br/>
+                  Подключите следующие шаги с помощью линий связи (edges) прямо на холсте.
+                </p>
+              </div>
+            )}
+
+            {/* Оставляем TEXTAREA только для цикла 'for' */}
+            {['for'].includes(selectedNode.data.type) && (
+              <div style={{ marginTop: '15px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация шага:</label>
+                <textarea 
+                  value={selectedNode.data.body} 
+                  onChange={(e) => updateNodeData('body', e.target.value)}
+                  style={{ width: '100%', height: '280px', marginTop: '5px', fontFamily: 'monospace', fontSize: '11px', whiteSpace: 'pre' }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -539,7 +705,6 @@ function WorkflowNode({ data }) {
 
   return (
     <div style={{ minWidth: 180, border: "1px solid #bbb", borderRadius: 8, background: "#fff", overflow: "hidden", boxShadow: "0 2px 5px rgba(0,0,0,.15)" }}>
-      {/* Вход сверху для всех узлов */}
       <Handle type="target" position={Position.Top} />
 
       <div style={{ background: colors[data.type] || "#666", color: "white", padding: "6px 10px", fontWeight: "bold", fontSize: 13 }}>
@@ -550,12 +715,9 @@ function WorkflowNode({ data }) {
         {data.stepName}
       </div>
 
-      {/* Выходы снизу */}
       {!isTryCatch ? (
-        // Обычный узел или fork
         <Handle type="source" position={Position.Bottom} />
       ) : (
-        // Узел tryCatch с двумя отдельными выходами
         <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', padding: '6px 20px', background: '#f9f9f9', borderTop: '1px solid #eee', fontSize: 10, fontWeight: 'bold' }}>
           <div style={{ color: '#4caf50' }}>TRY</div>
           <div style={{ color: '#f44336' }}>CATCH</div>
