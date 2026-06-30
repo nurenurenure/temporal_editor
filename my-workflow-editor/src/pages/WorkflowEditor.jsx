@@ -673,18 +673,102 @@ export default function WorkflowEditor() {
                 </p>
               </div>
             )}
+            {/* 🔄 ИНТЕРФЕЙС ДЛЯ FOR LOOP */}
+{selectedNode.data.type === 'for' && (() => {
+  // Дефолтная структура на случай, если body пустой или поврежден
+  let bodyObj = { for: { each: "item", in: "", at: "index" }, do: [] };
+  try { 
+    bodyObj = JSON.parse(selectedNode.data.body || '{}'); 
+  } catch(e) {}
+  
+  const forData = bodyObj.for || {};
+  const doData = bodyObj.do || [];
 
-            {/* Оставляем TEXTAREA только для цикла 'for' */}
-            {['for'].includes(selectedNode.data.type) && (
-              <div style={{ marginTop: '15px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация шага:</label>
-                <textarea 
-                  value={selectedNode.data.body} 
-                  onChange={(e) => updateNodeData('body', e.target.value)}
-                  style={{ width: '100%', height: '280px', marginTop: '5px', fontFamily: 'monospace', fontSize: '11px', whiteSpace: 'pre' }}
-                />
-              </div>
-            )}
+  // Функция для безопасного обновления полей итератора
+  const updateForField = (field, value) => {
+    const newBody = {
+      ...bodyObj,
+      for: {
+        ...forData,
+        [field]: value
+      }
+    };
+    updateNodeData('body', JSON.stringify(newBody, null, 2));
+  };
+
+  return (
+    <div>
+      <h4 style={{ margin: '0 0 10px 0', color: '#2196f3' }}>Настройка итератора</h4>
+      
+      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Имя переменной элемента (each):</label>
+      <input
+        type="text"
+        value={forData.each || 'item'}
+        onChange={(e) => updateForField('each', e.target.value)}
+        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+        placeholder="item"
+      />
+
+      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Массив для перебора (in):</label>
+      <input
+        type="text"
+        value={forData.in || ''}
+        onChange={(e) => updateForField('in', e.target.value)}
+        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+        placeholder="${ $input.ordersArray }"
+      />
+
+      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Переменная индекса (at):</label>
+      <input
+        type="text"
+        value={forData.at || 'index'}
+        onChange={(e) => updateForField('at', e.target.value)}
+        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '15px', boxSizing: 'border-box' }}
+        placeholder="index"
+      />
+
+      <div style={{ borderTop: '1px solid #ccc', paddingTop: '10px' }}>
+        <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#555' }}>
+          Тело цикла (массив шагов `do`):
+        </label>
+        <textarea
+          value={typeof doData === 'string' ? doData : JSON.stringify(doData, null, 2)}
+          onChange={(e) => {
+            const rawText = e.target.value;
+            try {
+              // Если пользователь ввёл валидный JSON-массив, парсим и обновляем
+              const parsedDo = JSON.parse(rawText);
+              const newBody = { ...bodyObj, do: parsedDo };
+              updateNodeData('body', JSON.stringify(newBody, null, 2));
+            } catch (err) {
+              // Если JSON в процессе ввода временно невалиден, не ломаем UI, 
+              // а просто обновляем текст напрямую, чтобы пользователь мог дописать кавычку/скобку
+              const newBody = { ...bodyObj, do: rawText };
+              updateNodeData('body', JSON.stringify(newBody));
+            }
+          }}
+          style={{ 
+            width: '100%', 
+            height: '180px', 
+            marginTop: '5px', 
+            fontFamily: 'monospace', 
+            fontSize: '11px',
+            boxSizing: 'border-box'
+          }}
+          placeholder={`[
+  {
+    "stepName": {}
+  }
+]`}
+        />
+        <span style={{ fontSize: '10px', color: '#888' }}>
+          💡 Внутри тела цикла вы можете обращаться к элементу как <code>{"${ $data.item }"}</code> (или вашему имени из поля each).
+        </span>
+      </div>
+    </div>
+  );
+})()}
+            
           </div>
         </div>
       )}
