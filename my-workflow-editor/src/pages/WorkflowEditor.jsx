@@ -19,12 +19,12 @@ const defaultTemplates = {
   for: '{\n  "for": {\n    "each": "item",\n    "in": "${ $input.data }",\n    "at": "index"\n  },\n  "do": [\n    {\n      "setData": {\n        "set": {\n          "userId": "${ $data.item.userId }",\n          "loop_index": "${ $data.index }",\n          "status": "processed_by_loop"\n        }\n      }\n    },\n    {\n      "wait": {\n        "wait": {\n          "seconds": 1\n        }\n      }\n    }\n  ]\n}',
 parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "wait": {\n            "seconds": 5\n          }\n        }\n      },\n      {\n        "branch_2_wait": {\n          "wait": {\n            "seconds": 10\n          }\n        }\n      }\n    ]\n  }\n}',
   
-  tryCatch: '{\n  "try": [\n    {\n      "getUser": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n        }\n      }\n    }\n  ],\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
-  call_http: '{\n  "do": [\n    {\n      "myHttpCall": {\n        "call": "http",\n        "with": {\n          "method": "get",\n          "endpoint": "https://jsonplaceholder.typicode.com/posts/1"\n        }\n      }\n    }\n  ]\n}',
+tryCatch: '{\n  "try": {\n    "do": [\n      {\n        "getUser": {\n          "call": "http",\n          "with": {\n            "method": "get",\n            "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n          }\n        }\n      }\n    ]\n  },\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
+  call_http: '{\n  "call": "http",\n  "with": {\n    "method": "get",\n    "endpoint": "https://jsonplaceholder.typicode.com/posts/1"\n  }\n}',
 
-  call_activity: '{\n  "do": [\n    {\n      "myNativeActivity": {\n        "call": "activity",\n        "with": {\n          "name": "ProcessPaymentActivity",\n          "input": {\n            "amount": "${ $input.amount }",\n            "currency": "USD"\n          }\n        }\n      }\n    }\n  ]\n}',
+  call_activity: '{\n  "call": "activity",\n  "with": {\n    "name": "ProcessPaymentActivity",\n    "input": {\n      "amount": "${ $input.amount }",\n      "currency": "USD"\n    }\n  }\n}',
 
-  call_grpc: '{\n  "do": [\n    {\n      "myGrpcCall": {\n        "call": "grpc",\n        "with": {\n          "address": "user-service:50051",\n          "service": "users.UserService",\n          "method": "GetUserProfile",\n          "payload": {\n            "user_id": "${ $input.userId }"\n          }\n        }\n      }\n    }\n  ]\n}'
+  call_grpc: '{\n  "call": "grpc",\n  "with": {\n    "address": "user-service:50051",\n    "service": "users.UserService",\n    "method": "GetUserProfile",\n    "payload": {\n      "user_id": "${ $input.userId }"\n    }\n  }\n}'
 };
 const nodeTypes = {
   workflow: WorkflowNode
@@ -109,39 +109,84 @@ export default function WorkflowEditor() {
     setSelectedNode((prev) => ({ ...prev, data: { ...prev.data, type: newType, body: newBodyTemplate } }));
   };
 
-  const getOrderedSteps = () => {
+const getOrderedSteps = () => {
     if (nodes.length === 0) return [];
 
     const targetIds = new Set(edges.map((e) => e.target));
     const startNodes = nodes.filter((n) => !targetIds.has(n.id));
 
     if (startNodes.length === 0) throw new Error("Зацикленный граф!");
+    const startNode = startNodes[0];
 
-    const orderedSteps = [];
-    const visited = new Set();
-    const queue = [...startNodes];
+    // Рекурсивная функция для сборки дерева вложенностей
+   const buildNativeSequence = (startNodeId, visited = new Set()) => {
+      let currentId = startNodeId;
+      const sequence = [];
 
-    while (queue.length > 0) {
-      const currentNode = queue.shift();
-      if (visited.has(currentNode.id)) continue;
-      visited.add(currentNode.id);
-      
-      let parsedBody = {};
-      try {
-        parsedBody = JSON.parse(currentNode.data.body || '{}');
-      } catch (e) {
-        throw new Error(`Ошибка JSON в шаге "${currentNode.data.stepName}": ${e.message}`);
+      while (currentId) {
+        if (visited.has(currentId)) break; // Защита от бесконечного цикла
+        visited.add(currentId);
+
+        const node = nodes.find(n => n.id === currentId);
+        if (!node) break;
+
+        let stepBody = {};
+
+        if (node.data?.type === 'parallel') {
+          // Ищем все стрелки, выходящие из форка (это наши ветки)
+          const outEdges = edges.filter(e => e.source === currentId);
+          const branches = outEdges.map((edge, index) => {
+            return {
+              // Рекурсивно уходим внутрь каждой ветки
+              [`branch_${index + 1}`]: {
+                do: buildNativeSequence(edge.target, new Set(visited))
+              }
+            };
+          });
+          
+          stepBody = { fork: { branches } };
+          sequence.push({ [node.data.stepName]: stepBody });
+          break; // В нашей логике форк забирает весь дальнейший поток в свои ветки
+        } 
+        else if (node.data?.type === 'tryCatch') {
+          // Ищем конкретные стрелки по ID порта (try и catch)
+          const tryEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'try');
+          const catchEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'catch');
+
+          stepBody = {
+            try: tryEdge ? buildNativeSequence(tryEdge.target, new Set(visited)) : [],
+            catch: {
+              do: catchEdge ? buildNativeSequence(catchEdge.target, new Set(visited)) : []
+            }
+          };
+          
+          sequence.push({ [node.data.stepName]: stepBody });
+          break; // Ветки try/catch уходят в свои цепочки
+        }
+        else {
+          // Обычный линейный узел (set, wait, call и т.д.)
+          try {
+            stepBody = JSON.parse(node.data.body || '{}');
+          } catch (e) {
+            throw new Error(`Ошибка JSON в шаге "${node.data.stepName}": ${e.message}`);
+          }
+          sequence.push({ [node.data.stepName]: stepBody });
+
+          // Идем к следующему узлу по прямой
+          const outEdges = edges.filter(e => e.source === currentId);
+          currentId = outEdges.length > 0 ? outEdges[0].target : null;
+        }
       }
+      return sequence;
+    };
 
-      orderedSteps.push({ name: currentNode.data.stepName, body: parsedBody });
-
-      const nextEdges = edges.filter((e) => e.source === currentNode.id);
-      nextEdges.forEach((edge) => {
-        const nextNode = nodes.find((n) => n.id === edge.target);
-        if (nextNode && !visited.has(nextNode.id)) queue.push(nextNode);
-      });
-    }
-    return orderedSteps;
+    const nativeSeq = buildNativeSequence(startNode.id);
+    
+    // Преобразуем верхний уровень массива в формат для API [{ name: "x", body: {} }]
+    return nativeSeq.map(item => {
+      const name = Object.keys(item)[0];
+      return { name: name, body: item[name] };
+    });
   };
 
   const handleSave = async () => {
@@ -454,8 +499,17 @@ maxWidth: 420, background: '#f8f9fa', borderLeft: '1px solid #ddd', padding: '20
   </div>
 )}
 
-{/* Остальные типы, для которых еще нет формы */}
-{['for', 'parallel', 'tryCatch', 'call_http', 'call_activity', 'call_grpc'].includes(selectedNode.data.type) && (
+{/* Сообщение для визуальных блоков */}
+{['parallel', 'tryCatch'].includes(selectedNode.data.type) && (
+  <div style={{ marginTop: '15px', padding: '10px', background: '#e3f2fd', border: '1px solid #2196f3', borderRadius: '4px' }}>
+    <p style={{ fontSize: '12px', margin: 0, color: '#0d47a1' }}>
+      ℹ️ Конфигурация этого блока задается визуально.<br/><br/>
+      Подключите следующие шаги с помощью линий связи (edges) прямо на холсте.
+    </p>
+  </div>
+)}
+
+{['for', 'call_http', 'call_activity', 'call_grpc'].includes(selectedNode.data.type) && (
   <div style={{ marginTop: '15px' }}>
     <label style={{ fontSize: '11px', fontWeight: 'bold' }}>JSON Конфигурация шага:</label>
     <textarea 
@@ -476,52 +530,39 @@ import { Handle, Position } from "reactflow";
 
 function WorkflowNode({ data }) {
   const colors = {
-    set: "#4caf50",
-    wait: "#ff9800",
-    switch: "#9c27b0",
-    for: "#2196f3",
-    parallel: "#00bcd4",
-    tryCatch: "#f44336",
-    call_http: "#3f51b5",
-    call_activity: "#607d8b",
-    call_grpc: "#009688"
+    set: "#4caf50", wait: "#ff9800", switch: "#9c27b0", for: "#2196f3",
+    parallel: "#00bcd4", tryCatch: "#f44336", call_http: "#3f51b5",
+    call_activity: "#607d8b", call_grpc: "#009688"
   };
 
+  const isTryCatch = data.type === 'tryCatch';
+
   return (
-    <div
-      style={{
-        minWidth: 180,
-        border: "1px solid #bbb",
-        borderRadius: 8,
-        background: "#fff",
-        overflow: "hidden",
-        boxShadow: "0 2px 5px rgba(0,0,0,.15)"
-      }}
-    >
+    <div style={{ minWidth: 180, border: "1px solid #bbb", borderRadius: 8, background: "#fff", overflow: "hidden", boxShadow: "0 2px 5px rgba(0,0,0,.15)" }}>
+      {/* Вход сверху для всех узлов */}
       <Handle type="target" position={Position.Top} />
 
-      <div
-        style={{
-          background: colors[data.type] || "#666",
-          color: "white",
-          padding: "6px 10px",
-          fontWeight: "bold",
-          fontSize: 13
-        }}
-      >
+      <div style={{ background: colors[data.type] || "#666", color: "white", padding: "6px 10px", fontWeight: "bold", fontSize: 13 }}>
         {data.type}
       </div>
 
-      <div
-        style={{
-          padding: 10,
-          fontSize: 14
-        }}
-      >
+      <div style={{ padding: 10, fontSize: 14 }}>
         {data.stepName}
       </div>
 
-      <Handle type="source" position={Position.Bottom} />
+      {/* Выходы снизу */}
+      {!isTryCatch ? (
+        // Обычный узел или fork
+        <Handle type="source" position={Position.Bottom} />
+      ) : (
+        // Узел tryCatch с двумя отдельными выходами
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', padding: '6px 20px', background: '#f9f9f9', borderTop: '1px solid #eee', fontSize: 10, fontWeight: 'bold' }}>
+          <div style={{ color: '#4caf50' }}>TRY</div>
+          <div style={{ color: '#f44336' }}>CATCH</div>
+          <Handle type="source" position={Position.Bottom} id="try" style={{ left: '25%', background: '#4caf50', width: 10, height: 10 }} />
+          <Handle type="source" position={Position.Bottom} id="catch" style={{ left: '75%', background: '#f44336', width: 10, height: 10 }} />
+        </div>
+      )}
     </div>
   );
 }
