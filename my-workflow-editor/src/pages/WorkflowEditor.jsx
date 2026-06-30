@@ -23,7 +23,8 @@ const defaultTemplates = {
 
   call_activity: '{\n  "call": "activity",\n  "with": {\n    "name": "ProcessPaymentActivity",\n    "input": {\n      "amount": "${ $input.amount }",\n      "currency": "USD"\n    }\n  }\n}',
 
-  call_grpc: '{\n  "call": "grpc",\n  "with": {\n    "address": "user-service:50051",\n    "service": "users.UserService",\n    "method": "GetUserProfile",\n    "payload": {\n      "user_id": "${ $input.userId }"\n    }\n  }\n}'
+  call_grpc: '{\n  "call": "grpc",\n  "with": {\n    "address": "user-service:50051",\n    "service": "users.UserService",\n    "method": "GetUserProfile",\n    "payload": {\n      "user_id": "${ $input.userId }"\n    }\n  }\n}',
+  join: '{\n  "join": {}\n}',
 };
 
 const nodeTypes = {
@@ -108,7 +109,7 @@ export default function WorkflowEditor() {
     setSelectedNode((prev) => ({ ...prev, data: { ...prev.data, type: newType, body: newBodyTemplate } }));
   };
 
-  const getOrderedSteps = () => {
+const getOrderedSteps = () => {
     if (nodes.length === 0) return [];
 
     const targetIds = new Set(edges.map((e) => e.target));
@@ -117,11 +118,34 @@ export default function WorkflowEditor() {
     if (startNodes.length === 0) throw new Error("Зацикленный граф!");
     const startNode = startNodes[0];
 
-    const buildNativeSequence = (startNodeId, visited = new Set()) => {
+    // Вспомогательная функция: ищет ближайший узел 'join' вниз по графу от развилки
+    const findJoinNode = (forkId) => {
+      let queue = edges.filter(e => e.source === forkId).map(e => e.target);
+      let seen = new Set();
+      
+      while(queue.length > 0) {
+        let currId = queue.shift();
+        if (seen.has(currId)) continue;
+        seen.add(currId);
+        
+        let node = nodes.find(x => x.id === currId);
+        if (node && node.data?.type === 'join') {
+          return currId; // Нашли точку слияния!
+        }
+        
+        let nextEdges = edges.filter(e => e.source === currId).map(e => e.target);
+        queue.push(...nextEdges);
+      }
+      return null;
+    };
+
+    // Добавляем параметр stopNodeId — узел, на котором текущая цепочка должна прерваться
+    const buildNativeSequence = (startNodeId, visited = new Set(), stopNodeId = null) => {
       let currentId = startNodeId;
       const sequence = [];
 
-      while (currentId) {
+      // Цикл крутится, пока есть currentId и мы не уперлись в stopNodeId
+      while (currentId && currentId !== stopNodeId) {
         if (visited.has(currentId)) break;
         visited.add(currentId);
 
@@ -132,18 +156,37 @@ export default function WorkflowEditor() {
 
         if (node.data?.type === 'parallel') {
           const outEdges = edges.filter(e => e.source === currentId);
+          
+          // 1. Ищем, где эти ветки сольются
+          const joinNodeId = findJoinNode(currentId);
+
+          // 2. Строим ветки. Говорим им: "Остановитесь, когда дойдете до joinNodeId"
           const branches = outEdges.map((edge, index) => {
             return {
               [`branch_${index + 1}`]: {
-                do: buildNativeSequence(edge.target, new Set(visited))
+                do: buildNativeSequence(edge.target, new Set(visited), joinNodeId)
               }
             };
           });
           
           stepBody = { fork: { branches } };
           sequence.push({ [node.data.stepName]: stepBody });
-          break;
+
+          // 3. Продолжаем основной поток после развилки
+          if (joinNodeId) {
+            currentId = joinNodeId;
+            continue; // Прыгаем на следующую итерацию while сразу с join-узла
+          } else {
+            break; // Если join не найден, парсинг останавливается (поведение по умолчанию)
+          }
         } 
+        else if (node.data?.type === 'join') {
+          // Если цикл наткнулся на join, мы просто проглатываем его как структурный элемент
+          // и переходим к следующему за ним узлу. В итоговый JSON сам join не попадает.
+          const outEdges = edges.filter(e => e.source === currentId);
+          currentId = outEdges.length > 0 ? outEdges[0].target : null;
+          continue; 
+        }
         else if (node.data?.type === 'tryCatch') {
           const tryEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'try');
           const catchEdge = edges.find(e => e.source === currentId && e.sourceHandle === 'catch');
@@ -156,9 +199,10 @@ export default function WorkflowEditor() {
           };
           
           sequence.push({ [node.data.stepName]: stepBody });
-          break;
+          break; // Для tryCatch тоже можно реализовать свой findJoinNode, если нужно продолжение
         }
         else {
+          // Стандартные узлы (wait, set, http и т.д.)
           try {
             stepBody = JSON.parse(node.data.body || '{}');
           } catch (e) {
@@ -319,6 +363,7 @@ export default function WorkflowEditor() {
             <option value="switch">switch (Ветвление)</option>
             <option value="for">for (Цикл по массиву)</option>
             <option value="parallel">parallel (Параллельные ветки)</option>
+            <option value="join">join (Точка слияния fork)</option>
             <option value="tryCatch">try/catch (Обработка ошибок)</option>
             <option value="call_http">call: HTTP (Внешний REST API)</option>
             <option value="call_activity">call: Activity (Код на воркере)</option>
