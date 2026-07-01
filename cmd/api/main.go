@@ -145,6 +145,7 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка перезаписи файла: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	go restartZigflowWorker()
 
 	// 4. Отдаем успешный ответ
 	wf.ID = id // Гарантируем, что ID в ответе правильный

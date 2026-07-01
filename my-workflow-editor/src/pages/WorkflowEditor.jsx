@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import ReactFlow, { 
   Background, 
   Controls, 
@@ -16,7 +17,7 @@ const defaultTemplates = {
   wait: '{\n  "wait": {\n    "seconds": 2\n  }\n}',
   switch: '{\n  "switch": [\n    {\n      "electronic": {\n        "when": "${ $input.orderType == \'electronic\' }",\n        "then": "processElectronicOrder"\n      }\n    },\n    {\n      "default": {\n        "then": "handleUnknownOrderType"\n      }\n    }\n  ]\n}',
   for: '{\n  "for": {\n    "each": "item",\n    "in": "${ $input.data }",\n    "at": "index"\n  },\n  "do": [\n    {\n      "setData": {\n        "set": {\n          "userId": "${ $data.item.userId }",\n          "loop_index": "${ $data.index }",\n          "status": "processed_by_loop"\n        }\n      }\n    },\n    {\n      "wait": {\n        "wait": {\n          "seconds": 1\n        }\n      }\n    }\n  ]\n}',
-  parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "wait": {\n            "seconds": 5\n          }\n        }\n      },\n      {\n        "branch_2_wait": {\n          "wait": {\n            "seconds": 10\n          }\n        }\n      }\n    ]\n  }\n}',
+  parallel: '{\n  "fork": {\n    "branches": [\n      {\n        "branch_1_wait": {\n          "do": [\n            {\n              "wait": {\n                "wait": {\n                  "seconds": 5\n                }\n              }\n            }\n          ]\n        }\n      },\n      {\n        "branch_2_wait": {\n          "do": [\n            {\n              "wait": {\n                "wait": {\n                  "seconds": 10\n                }\n              }\n            }\n          ]\n        }\n      }\n    ]\n  }\n}',
   
   tryCatch: '{\n  "try": {\n    "do": [\n      {\n        "getUser": {\n          "call": "http",\n          "with": {\n            "method": "get",\n            "endpoint": "https://jsonplaceholder.typicode.com/users/2000"\n          }\n        }\n      }\n    ]\n  },\n  "catch": {\n    "do": [\n      {\n        "setError": {\n          "set": {\n            "err": "some error"\n          }\n        }\n      }\n    ]\n  }\n}',
   call_http: '{\n  "call": "http",\n  "with": {\n    "method": "get",\n    "endpoint": "https://jsonplaceholder.typicode.com/posts/1"\n  }\n}',
@@ -44,16 +45,202 @@ const initialNodes = [
   }
 ];
 
+// --- ОБРАТНЫЙ МАППЕР (Deserializer) ---
+function inferNodeType(body) {
+  if (!body) return 'call_http';
+  if (body.join) return 'join';
+  if (body.wait) return 'wait';
+  if (body.set) return 'set';
+  if (body.switch) return 'switch';
+  if (body.for) return 'for';
+  if (body.fork) return 'parallel';
+  if (body.try) return 'tryCatch';
+  if (body.call === 'http') return 'call_http';
+  if (body.call === 'activity') return 'call_activity';
+  if (body.call === 'grpc') return 'call_grpc';
+  return 'call_http'; // Default
+}
+
+function stepsToGraph(steps) {
+  const nodes = [];
+  const edges = [];
+
+  // Вспомогательная функция конвертации вложенных структур Zigflow в формат {name, body}
+  const mapRawSteps = (rawArray) => {
+    if (!Array.isArray(rawArray)) return [];
+    return rawArray.map(obj => {
+      const name = Object.keys(obj)[0];
+      return { name, body: obj[name] };
+    });
+  };
+
+  function traverse(stepList, parentId = null, sourceHandle = null, startX = 250, startY = 50) {
+    if (!stepList || stepList.length === 0) return { lastId: parentId, maxY: startY };
+
+    let currentParentId = parentId;
+    let currentY = startY;
+    let currentX = startX;
+    let maxY = startY;
+
+    for (let i = 0; i < stepList.length; i++) {
+      const stepObj = stepList[i];
+      const stepName = stepObj.name;
+      const stepBody = stepObj.body;
+      
+      const nodeType = inferNodeType(stepBody);
+      const nodeId = getId();
+
+      nodes.push({
+        id: nodeId,
+        type: 'workflow',
+        position: { x: currentX, y: currentY },
+        data: {
+          stepName: stepName,
+          type: nodeType,
+          body: JSON.stringify(stepBody, null, 2)
+        }
+      });
+
+      if (currentParentId) {
+        edges.push({
+          id: `e_${currentParentId}-${nodeId}`,
+          source: currentParentId,
+          target: nodeId,
+          ...(sourceHandle ? { sourceHandle } : {})
+        });
+        sourceHandle = null; 
+      }
+
+      currentParentId = nodeId;
+      currentY += 150;
+      maxY = Math.max(maxY, currentY);
+
+      if (nodeType === 'parallel') {
+        const branches = stepBody.fork?.branches || [];
+        const lastBranchIds = [];
+        const branchWidth = 250;
+        const startBranchX = currentX - ((branches.length - 1) * branchWidth) / 2;
+        let maxBranchY = currentY;
+
+        branches.forEach((branchObj, idx) => {
+          const branchKey = Object.keys(branchObj)[0];
+          const rawBranchSteps = branchObj[branchKey]?.do || [];
+          const branchSteps = mapRawSteps(rawBranchSteps);
+          
+          const bX = startBranchX + idx * branchWidth;
+          const res = traverse(branchSteps, nodeId, null, bX, currentY);
+          
+          if (res.lastId && res.lastId !== nodeId) {
+            lastBranchIds.push(res.lastId);
+          }
+          maxBranchY = Math.max(maxBranchY, res.maxY);
+        });
+
+        // Создаем Join узел
+        const joinNodeId = getId();
+        currentY = maxBranchY + 50;
+        nodes.push({
+          id: joinNodeId,
+          type: 'workflow',
+          position: { x: currentX, y: currentY },
+          data: {
+            stepName: `join_${Math.floor(Math.random()*1000)}`,
+            type: 'join',
+            body: '{\n  "join": {}\n}'
+          }
+        });
+
+        lastBranchIds.forEach(bId => {
+          edges.push({ id: `e_${bId}-${joinNodeId}`, source: bId, target: joinNodeId });
+        });
+
+        currentParentId = joinNodeId;
+        currentY += 150;
+        maxY = Math.max(maxY, currentY);
+      } 
+      else if (nodeType === 'tryCatch') {
+        // Парсим try
+        const rawTrySteps = stepBody.try?.do || stepBody.try || [];
+        const trySteps = mapRawSteps(rawTrySteps);
+        
+        // Парсим catch
+        const rawCatchSteps = stepBody.catch?.do || [];
+        const catchSteps = mapRawSteps(rawCatchSteps);
+
+        let maxChildY = currentY;
+
+        const tryRes = traverse(trySteps, nodeId, 'try', currentX - 180, currentY);
+        const catchRes = traverse(catchSteps, nodeId, 'catch', currentX + 180, currentY);
+        
+        maxChildY = Math.max(maxChildY, tryRes.maxY, catchRes.maxY);
+        currentY = maxChildY;
+        maxY = Math.max(maxY, currentY);
+        
+        // В нашей реализации getOrderedSteps на tryCatch происходит break линейного потока
+        break; 
+      }
+    }
+    return { lastId: currentParentId, maxY: maxY };
+  }
+
+  traverse(steps);
+  return { nodes, edges };
+}
+
 export default function WorkflowEditor() {
-  const [nodes, setNodes] = useState(initialNodes);
+  const { id } = useParams(); // Читаем ID из URL (например, /workflows/:id/edit)
+  const navigate = useNavigate();
+
+  const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
+  const [isInitializing, setIsInitializing] = useState(true);
   
-  const [workflowName, setWorkflowName] = useState('Switch Testing Workflow');
+  const [workflowName, setWorkflowName] = useState('New Workflow');
   const [selectedNode, setSelectedNode] = useState(null);
   
   const [workflowId, setWorkflowId] = useState(null);
   const [runPayload, setRunPayload] = useState('{\n  "data": [\n    {\n      "orderType": "electronic"\n    }\n  ]\n}');
   const [runResult, setRunResult] = useState(null);
+
+  // 1. ОПРЕДЕЛЕНИЕ РЕЖИМА И ЗАГРУЗКА
+  useEffect(() => {
+    const fetchWorkflow = async () => {
+      if (!id || id === 'new') {
+        // Режим создания
+        setNodes(initialNodes);
+        setEdges([]);
+        setWorkflowId(null);
+        setIsInitializing(false);
+        return;
+      }
+
+      // Режим редактирования
+      try {
+        const response = await fetch(`http://localhost:8080/api/workflows/${id}`);
+        if (!response.ok) throw new Error('Ошибка загрузки воркфлоу');
+        const wf = await response.json();
+
+        setWorkflowId(wf.id);
+        setWorkflowName(wf.name || 'Без названия');
+        
+        if (wf.steps && wf.steps.length > 0) {
+          const graph = stepsToGraph(wf.steps);
+          setNodes(graph.nodes);
+          setEdges(graph.edges);
+        } else {
+          setNodes([]);
+          setEdges([]);
+        }
+      } catch (error) {
+        alert('Не удалось загрузить граф: ' + error.message);
+        setNodes(initialNodes);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    fetchWorkflow();
+  }, [id]);
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
@@ -109,7 +296,7 @@ export default function WorkflowEditor() {
     setSelectedNode((prev) => ({ ...prev, data: { ...prev.data, type: newType, body: newBodyTemplate } }));
   };
 
-const getOrderedSteps = () => {
+  const getOrderedSteps = () => {
     if (nodes.length === 0) return [];
 
     const targetIds = new Set(edges.map((e) => e.target));
@@ -118,7 +305,6 @@ const getOrderedSteps = () => {
     if (startNodes.length === 0) throw new Error("Зацикленный граф!");
     const startNode = startNodes[0];
 
-    // Вспомогательная функция: ищет ближайший узел 'join' вниз по графу от развилки
     const findJoinNode = (forkId) => {
       let queue = edges.filter(e => e.source === forkId).map(e => e.target);
       let seen = new Set();
@@ -130,7 +316,7 @@ const getOrderedSteps = () => {
         
         let node = nodes.find(x => x.id === currId);
         if (node && node.data?.type === 'join') {
-          return currId; // Нашли точку слияния!
+          return currId; 
         }
         
         let nextEdges = edges.filter(e => e.source === currId).map(e => e.target);
@@ -139,12 +325,10 @@ const getOrderedSteps = () => {
       return null;
     };
 
-    // Добавляем параметр stopNodeId — узел, на котором текущая цепочка должна прерваться
     const buildNativeSequence = (startNodeId, visited = new Set(), stopNodeId = null) => {
       let currentId = startNodeId;
       const sequence = [];
 
-      // Цикл крутится, пока есть currentId и мы не уперлись в stopNodeId
       while (currentId && currentId !== stopNodeId) {
         if (visited.has(currentId)) break;
         visited.add(currentId);
@@ -153,36 +337,32 @@ const getOrderedSteps = () => {
         if (!node) break;
 
         let stepBody = {};
-
         if (node.data?.type === 'parallel') {
           const outEdges = edges.filter(e => e.source === currentId);
-          
-          // 1. Ищем, где эти ветки сольются
-          const joinNodeId = findJoinNode(currentId);
+const joinNodeId = findJoinNode(currentId);
 
-          // 2. Строим ветки. Говорим им: "Остановитесь, когда дойдете до joinNodeId"
-          const branches = outEdges.map((edge, index) => {
-            return {
-              [`branch_${index + 1}`]: {
-                do: buildNativeSequence(edge.target, new Set(visited), joinNodeId)
-              }
-            };
-          });
-          
-          stepBody = { fork: { branches } };
-          sequence.push({ [node.data.stepName]: stepBody });
+const branches = outEdges.map((edge, index) => ({
+    [`branch_${index + 1}`]: {
+        do: buildNativeSequence(edge.target, new Set(visited), joinNodeId)
+    }
+}));
 
-          // 3. Продолжаем основной поток после развилки
-          if (joinNodeId) {
-            currentId = joinNodeId;
-            continue; // Прыгаем на следующую итерацию while сразу с join-узла
-          } else {
-            break; // Если join не найден, парсинг останавливается (поведение по умолчанию)
-          }
-        } 
+sequence.push({
+    [node.data.stepName]: {
+        fork: {
+            branches
+        }
+    }
+});
+
+if (joinNodeId) {
+    currentId = joinNodeId;
+    continue;
+}
+
+break;
+        }
         else if (node.data?.type === 'join') {
-          // Если цикл наткнулся на join, мы просто проглатываем его как структурный элемент
-          // и переходим к следующему за ним узлу. В итоговый JSON сам join не попадает.
           const outEdges = edges.filter(e => e.source === currentId);
           currentId = outEdges.length > 0 ? outEdges[0].target : null;
           continue; 
@@ -199,10 +379,9 @@ const getOrderedSteps = () => {
           };
           
           sequence.push({ [node.data.stepName]: stepBody });
-          break; // Для tryCatch тоже можно реализовать свой findJoinNode, если нужно продолжение
+          break; 
         }
         else {
-          // Стандартные узлы (wait, set, http и т.д.)
           try {
             stepBody = JSON.parse(node.data.body || '{}');
           } catch (e) {
@@ -225,13 +404,20 @@ const getOrderedSteps = () => {
     });
   };
 
+  // 6. ИЗМЕНЕННОЕ СОХРАНЕНИЕ
   const handleSave = async () => {
     try {
       const steps = getOrderedSteps();
       const payload = { name: workflowName, description: "UI Generated", steps };
       
-      const response = await fetch('http://localhost:8080/api/workflows', {
-        method: 'POST',
+      const url = workflowId 
+        ? `http://localhost:8080/api/workflows/${workflowId}` 
+        : 'http://localhost:8080/api/workflows';
+        
+      const method = workflowId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -242,6 +428,11 @@ const getOrderedSteps = () => {
       setWorkflowId(resData.id); 
       setRunResult(null); 
       alert(`Сохранено успешно! ID: ${resData.id}`);
+      
+      // Если это было создание, обновляем урл, чтобы перевести в режим редактирования
+      if (!workflowId) {
+        navigate(`/workflows/${resData.id}/edit`, { replace: true });
+      }
     } catch (err) {
       alert(err.message);
     }
@@ -254,7 +445,6 @@ const getOrderedSteps = () => {
     }
 
     let parsedPayload = { data: [] }; 
-    
     if (runPayload.trim()) {
       try {
         parsedPayload = JSON.parse(runPayload);
@@ -278,6 +468,8 @@ const getOrderedSteps = () => {
       alert('Ошибка запуска: ' + err.message);
     }
   };
+
+  if (isInitializing) return <div style={{ padding: '20px' }}>Инициализация холста...</div>;
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', overflow: 'hidden' }}>
@@ -370,8 +562,37 @@ const getOrderedSteps = () => {
             <option value="call_grpc">call: gRPC (Микросервисы)</option>
           </select>
 
-          <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
+          {/* ОБЩЕЕ ПОЛЕ IF (УСЛОВИЕ ВЫПОЛНЕНИЯ) */}
+          <div style={{ marginTop: '15px', padding: '10px', background: '#e3f2fd', borderRadius: '4px', border: '1px solid #90caf9' }}>
+            <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#0d47a1' }}>
+              Условие выполнения (if):
+            </label>
+            <input 
+              type="text"
+              value={JSON.parse(selectedNode.data.body || '{}').if || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                try {
+                  const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                  if (val.trim() === '') {
+                    delete currentBody.if;
+                    updateNodeData('body', JSON.stringify(currentBody, null, 2));
+                  } else {
+                    const { if: oldIf, ...restBody } = currentBody;
+                    const newBody = { if: val, ...restBody };
+                    updateNodeData('body', JSON.stringify(newBody, null, 2));
+                  }
+                } catch(err) {}
+              }}
+              placeholder="Например: ${ $input.integer % 2 == 0 }"
+              style={{ width: '100%', padding: '6px', marginTop: '5px', boxSizing: 'border-box' }}
+            />
+            <p style={{ fontSize: '10px', color: '#555', margin: '4px 0 0 0' }}>
+              Оставьте пустым для безусловного выполнения.
+            </p>
+          </div>
 
+          <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
             {selectedNode.data.type === 'wait' && (
               <div>
                 <label>Секунды:</label>
@@ -380,7 +601,10 @@ const getOrderedSteps = () => {
                   value={JSON.parse(selectedNode.data.body || '{"wait":{"seconds":0}}').wait?.seconds || 0}
                   onChange={(e) => {
                     const val = parseInt(e.target.value) || 0;
-                    updateNodeData('body', JSON.stringify({ wait: { seconds: val } }, null, 2));
+                    try {
+                      const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                      updateNodeData('body', JSON.stringify({ ...currentBody, wait: { seconds: val } }, null, 2));
+                    } catch(err) {}
                   }}
                   style={{ width: '100%', padding: '5px' }}
                 />
@@ -397,15 +621,18 @@ const getOrderedSteps = () => {
                       placeholder="Ключ"
                       onChange={(e) => {
                         const newKey = e.target.value;
-                        const currentData = JSON.parse(selectedNode.data.body).set;
-                        if (newKey !== key && currentData.hasOwnProperty(newKey)) {
-                          alert("Ключ с таким именем уже существует!");
-                          return;
-                        }
-                        const newData = { ...currentData };
-                        delete newData[key];
-                        newData[newKey] = value;
-                        updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+                        try {
+                          const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                          const currentData = currentBody.set || {};
+                          if (newKey !== key && currentData.hasOwnProperty(newKey)) {
+                            alert("Ключ с таким именем уже существует!");
+                            return;
+                          }
+                          const newData = { ...currentData };
+                          delete newData[key];
+                          newData[newKey] = value;
+                          updateNodeData('body', JSON.stringify({ ...currentBody, set: newData }, null, 2));
+                        } catch(err){}
                       }}
                       style={{ width: '40%', padding: '4px' }}
                     />
@@ -413,9 +640,12 @@ const getOrderedSteps = () => {
                       value={value} 
                       placeholder="Значение"
                       onChange={(e) => {
-                        const currentData = JSON.parse(selectedNode.data.body).set;
-                        const newData = { ...currentData, [key]: e.target.value };
-                        updateNodeData('body', JSON.stringify({ set: newData }, null, 2));
+                        try {
+                          const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                          const currentData = currentBody.set || {};
+                          const newData = { ...currentData, [key]: e.target.value };
+                          updateNodeData('body', JSON.stringify({ ...currentBody, set: newData }, null, 2));
+                        } catch(err){}
                       }}
                       style={{ width: '60%', padding: '4px' }}
                     />
@@ -423,13 +653,16 @@ const getOrderedSteps = () => {
                 ))}
                 <button 
                   onClick={() => {
-                    const currentData = JSON.parse(selectedNode.data.body || '{"set":{}}').set || {};
-                    const newKeyName = "new_field";
-                    if (currentData.hasOwnProperty(newKeyName)) {
-                       alert("Сначала переименуйте существующее поле!");
-                       return;
-                    }
-                    updateNodeData('body', JSON.stringify({ set: { ...currentData, [newKeyName]: "значение" } }, null, 2));
+                    try {
+                      const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                      const currentData = currentBody.set || {};
+                      const newKeyName = "new_field";
+                      if (currentData.hasOwnProperty(newKeyName)) {
+                         alert("Сначала переименуйте существующее поле!");
+                         return;
+                      }
+                      updateNodeData('body', JSON.stringify({ ...currentBody, set: { ...currentData, [newKeyName]: "значение" } }, null, 2));
+                    } catch(err){}
                   }}
                   style={{ marginTop: '10px', width: '100%' }}
                 >
@@ -441,7 +674,7 @@ const getOrderedSteps = () => {
             {selectedNode.data.type === 'switch' && (
               <div>
                 <label style={{ fontWeight: 'bold' }}>Условия ветвления:</label>
-                {JSON.parse(selectedNode.data.body || '{"switch":[]}').switch.map((item, index) => {
+                {JSON.parse(selectedNode.data.body || '{"switch":[]}').switch?.map((item, index) => {
                   const type = item.default ? 'default' : Object.keys(item)[0];
                   const condition = item[type].when || '';
                   const target = item[type].then;
@@ -454,10 +687,13 @@ const getOrderedSteps = () => {
                         readOnly={type === 'default'} 
                         onChange={(e) => {
                           const newKey = e.target.value;
-                          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-                          const branchData = newSwitch[index][type];
-                          newSwitch[index] = { [newKey]: branchData };
-                          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                          try {
+                            const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                            const newSwitch = [...(currentBody.switch || [])];
+                            const branchData = newSwitch[index][type];
+                            newSwitch[index] = { [newKey]: branchData };
+                            updateNodeData('body', JSON.stringify({ ...currentBody, switch: newSwitch }, null, 2));
+                          } catch(err){}
                         }}
                         style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
                       />
@@ -468,9 +704,12 @@ const getOrderedSteps = () => {
                           <input 
                             value={condition}
                             onChange={(e) => {
-                              const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-                              newSwitch[index][type].when = e.target.value;
-                              updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                              try {
+                                const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                                const newSwitch = [...(currentBody.switch || [])];
+                                newSwitch[index][type].when = e.target.value;
+                                updateNodeData('body', JSON.stringify({ ...currentBody, switch: newSwitch }, null, 2));
+                              } catch(err){}
                             }}
                             style={{ width: '100%', marginBottom: '5px', padding: '4px' }}
                           />
@@ -481,9 +720,12 @@ const getOrderedSteps = () => {
                       <input 
                         value={target}
                         onChange={(e) => {
-                          const newSwitch = [...JSON.parse(selectedNode.data.body).switch];
-                          newSwitch[index][type].then = e.target.value;
-                          updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                          try {
+                            const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                            const newSwitch = [...(currentBody.switch || [])];
+                            newSwitch[index][type].then = e.target.value;
+                            updateNodeData('body', JSON.stringify({ ...currentBody, switch: newSwitch }, null, 2));
+                          } catch(err){}
                         }}
                         style={{ width: '100%', padding: '4px' }}
                       />
@@ -492,12 +734,15 @@ const getOrderedSteps = () => {
                 })}
                 <button 
                   onClick={() => {
-                    const currentSwitch = JSON.parse(selectedNode.data.body).switch;
-                    const newCondition = { 
-                      "new_type": { "when": "${ $input.val == 'new' }", "then": "nextStep" } 
-                    };
-                    const newSwitch = [...currentSwitch.slice(0, -1), newCondition, currentSwitch[currentSwitch.length - 1]];
-                    updateNodeData('body', JSON.stringify({ switch: newSwitch }, null, 2));
+                    try {
+                      const currentBody = JSON.parse(selectedNode.data.body || '{}');
+                      const currentSwitch = currentBody.switch || [];
+                      const newCondition = { 
+                        "new_type": { "when": "${ $input.val == 'new' }", "then": "nextStep" } 
+                      };
+                      const newSwitch = [...currentSwitch.slice(0, -1), newCondition, currentSwitch[currentSwitch.length - 1]];
+                      updateNodeData('body', JSON.stringify({ ...currentBody, switch: newSwitch }, null, 2));
+                    } catch(err){}
                   }}
                   style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#e0e0e0', border: 'none', cursor: 'pointer' }}
                 >
@@ -506,7 +751,6 @@ const getOrderedSteps = () => {
               </div>
             )}
 
-            {/* 🌐 ИНТЕРФЕЙС ДЛЯ CALL HTTP */}
             {selectedNode.data.type === 'call_http' && (() => {
               let bodyObj = { call: "http", with: { method: "get", endpoint: "" } };
               try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
@@ -544,7 +788,6 @@ const getOrderedSteps = () => {
               );
             })()}
 
-            {/* ⚡ ИНТЕРФЕЙС ДЛЯ CALL ACTIVITY */}
             {selectedNode.data.type === 'call_activity' && (() => {
               let bodyObj = { call: "activity", with: { name: "", input: {} } };
               try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
@@ -615,7 +858,6 @@ const getOrderedSteps = () => {
               );
             })()}
 
-            {/* 🧬 ИНТЕРФЕЙС ДЛЯ CALL GRPC */}
             {selectedNode.data.type === 'call_grpc' && (() => {
               let bodyObj = { call: "grpc", with: { address: "", service: "", method: "", payload: {} } };
               try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e){}
@@ -718,102 +960,89 @@ const getOrderedSteps = () => {
                 </p>
               </div>
             )}
-            {/* 🔄 ИНТЕРФЕЙС ДЛЯ FOR LOOP */}
-{selectedNode.data.type === 'for' && (() => {
-  // Дефолтная структура на случай, если body пустой или поврежден
-  let bodyObj = { for: { each: "item", in: "", at: "index" }, do: [] };
-  try { 
-    bodyObj = JSON.parse(selectedNode.data.body || '{}'); 
-  } catch(e) {}
-  
-  const forData = bodyObj.for || {};
-  const doData = bodyObj.do || [];
 
-  // Функция для безопасного обновления полей итератора
-  const updateForField = (field, value) => {
-    const newBody = {
-      ...bodyObj,
-      for: {
-        ...forData,
-        [field]: value
-      }
-    };
-    updateNodeData('body', JSON.stringify(newBody, null, 2));
-  };
+            {/* 🔄 ДРУЖЕСТВЕННЫЙ ИНТЕРФЕЙС ДЛЯ FOR LOOP */}
+            {selectedNode.data.type === 'for' && (() => {
+              let bodyObj = { for: { each: "item", in: "", at: "index" }, do: [] };
+              try { 
+                bodyObj = JSON.parse(selectedNode.data.body || '{}'); 
+              } catch(e) {}
+              
+              const forData = bodyObj.for || {};
+              const doData = bodyObj.do || [];
 
-  return (
-    <div>
-      <h4 style={{ margin: '0 0 10px 0', color: '#2196f3' }}>Настройка итератора</h4>
-      
-      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Имя переменной элемента (each):</label>
-      <input
-        type="text"
-        value={forData.each || 'item'}
-        onChange={(e) => updateForField('each', e.target.value)}
-        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
-        placeholder="item"
-      />
+              const updateForField = (field, value) => {
+                const newBody = {
+                  ...bodyObj,
+                  for: {
+                    ...forData,
+                    [field]: value
+                  }
+                };
+                updateNodeData('body', JSON.stringify(newBody, null, 2));
+              };
 
-      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Массив для перебора (in):</label>
-      <input
-        type="text"
-        value={forData.in || ''}
-        onChange={(e) => updateForField('in', e.target.value)}
-        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
-        placeholder="${ $input.ordersArray }"
-      />
+              return (
+                <div style={{ textAlign: 'left' }}>
+                  <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Имя переменной элемента (each):</label>
+                  <input
+                    type="text"
+                    value={forData.each || 'item'}
+                    onChange={(e) => updateForField('each', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+                    placeholder="item"
+                  />
 
-      <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Переменная индекса (at):</label>
-      <input
-        type="text"
-        value={forData.at || 'index'}
-        onChange={(e) => updateForField('at', e.target.value)}
-        style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '15px', boxSizing: 'border-box' }}
-        placeholder="index"
-      />
+                  <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Массив для перебора (in):</label>
+                  <input
+                    type="text"
+                    value={forData.in || ''}
+                    onChange={(e) => updateForField('in', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px', boxSizing: 'border-box' }}
+                    placeholder="${ $input.ordersArray }"
+                  />
 
-      <div style={{ borderTop: '1px solid #ccc', paddingTop: '10px' }}>
-        <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#555' }}>
-          Тело цикла (массив шагов `do`):
-        </label>
-        <textarea
-          value={typeof doData === 'string' ? doData : JSON.stringify(doData, null, 2)}
-          onChange={(e) => {
-            const rawText = e.target.value;
-            try {
-              // Если пользователь ввёл валидный JSON-массив, парсим и обновляем
-              const parsedDo = JSON.parse(rawText);
-              const newBody = { ...bodyObj, do: parsedDo };
-              updateNodeData('body', JSON.stringify(newBody, null, 2));
-            } catch (err) {
-              // Если JSON в процессе ввода временно невалиден, не ломаем UI, 
-              // а просто обновляем текст напрямую, чтобы пользователь мог дописать кавычку/скобку
-              const newBody = { ...bodyObj, do: rawText };
-              updateNodeData('body', JSON.stringify(newBody));
-            }
-          }}
-          style={{ 
-            width: '100%', 
-            height: '180px', 
-            marginTop: '5px', 
-            fontFamily: 'monospace', 
-            fontSize: '11px',
-            boxSizing: 'border-box'
-          }}
-          placeholder={`[
+                  <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Переменная индекса (at):</label>
+                  <input
+                    type="text"
+                    value={forData.at || 'index'}
+                    onChange={(e) => updateForField('at', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '15px', boxSizing: 'border-box' }}
+                    placeholder="index"
+                  />
+
+                  <div style={{ borderTop: '1px solid #ccc', paddingTop: '10px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#555' }}>
+                      Тело цикла (массив шагов `do`):
+                    </label>
+                    <textarea
+                      value={typeof doData === 'string' ? doData : JSON.stringify(doData, null, 2)}
+                      onChange={(e) => {
+                        const rawText = e.target.value;
+                        try {
+                          const parsedDo = JSON.parse(rawText);
+                          const newBody = { ...bodyObj, do: parsedDo };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        } catch (err) {
+                          const newBody = { ...bodyObj, do: rawText };
+                          updateNodeData('body', JSON.stringify(newBody));
+                        }
+                      }}
+                      style={{ 
+                        width: '100%', height: '180px', marginTop: '5px', 
+                        fontFamily: 'monospace', fontSize: '11px', boxSizing: 'border-box'
+                      }}
+                      placeholder={`[
   {
     "stepName": {}
   }
 ]`}
-        />
-        <span style={{ fontSize: '10px', color: '#888' }}>
-          💡 Внутри тела цикла вы можете обращаться к элементу как <code>{"${ $data.item }"}</code> (или вашему имени из поля each).
-        </span>
-      </div>
-    </div>
-  );
-})()}
-            
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
           </div>
         </div>
       )}
@@ -827,7 +1056,7 @@ function WorkflowNode({ data }) {
   const colors = {
     set: "#4caf50", wait: "#ff9800", switch: "#9c27b0", for: "#2196f3",
     parallel: "#00bcd4", tryCatch: "#f44336", call_http: "#3f51b5",
-    call_activity: "#607d8b", call_grpc: "#009688"
+    call_activity: "#607d8b", call_grpc: "#009688", join: "#757575"
   };
 
   const isTryCatch = data.type === 'tryCatch';
