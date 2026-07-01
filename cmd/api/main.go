@@ -18,6 +18,10 @@ import (
 	"temporal_editor/internal/database"
 	"temporal_editor/internal/models"
 	"temporal_editor/internal/validator"
+
+	commonpb "go.temporal.io/api/common/v1"
+	enumspb "go.temporal.io/api/enums/v1"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 )
 
 var temporalClient client.Client
@@ -203,6 +207,45 @@ func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func getRunDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	workflowID := r.PathValue("workflowId")
+	runID := r.PathValue("runId")
+
+	resp, err := temporalClient.WorkflowService().DescribeWorkflowExecution(
+		context.Background(),
+		&workflowservice.DescribeWorkflowExecutionRequest{
+			Namespace: "default",
+			Execution: &commonpb.WorkflowExecution{
+				WorkflowId: workflowID,
+				RunId:      runID,
+			},
+		},
+	)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	info := resp.WorkflowExecutionInfo
+
+	result := map[string]any{
+		"workflow_id":    info.Execution.WorkflowId,
+		"run_id":         info.Execution.RunId,
+		"workflow_type":  info.Type.Name,
+		"status":         workflowStatusToString(info.Status),
+		"history_length": info.HistoryLength,
+		"start_time":     info.StartTime.AsTime(),
+	}
+
+	if info.CloseTime != nil {
+		result["close_time"] = info.CloseTime.AsTime()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	var wf models.Workflow
 
@@ -311,6 +354,27 @@ func enableCORS(next http.Handler) http.Handler {
 	})
 }
 
+func workflowStatusToString(status enumspb.WorkflowExecutionStatus) string {
+	switch status {
+	case enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING:
+		return "RUNNING"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
+		return "COMPLETED"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
+		return "FAILED"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
+		return "TERMINATED"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
+		return "TIMED_OUT"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED:
+		return "CANCELED"
+	case enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
+		return "CONTINUED_AS_NEW"
+	default:
+		return status.String()
+	}
+}
+
 func main() {
 	// Инициализируем базу данных
 	connStr := "host=localhost port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
@@ -338,6 +402,7 @@ func main() {
 	mux.HandleFunc("POST /api/workflows/{id}/run", runWorkflowHandler)
 	mux.HandleFunc("GET /api/workflows", getAllWorkflowsHandler)
 	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
+	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
 
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
