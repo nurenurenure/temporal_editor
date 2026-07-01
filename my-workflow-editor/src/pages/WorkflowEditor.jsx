@@ -201,7 +201,7 @@ export default function WorkflowEditor() {
   const [workflowId, setWorkflowId] = useState(null);
   const [runPayload, setRunPayload] = useState('{\n  "data": [\n    {\n      "orderType": "electronic"\n    }\n  ]\n}');
   const [runResult, setRunResult] = useState(null);
-
+  const [runDetails, setRunDetails] = useState(null);
   // 1. ОПРЕДЕЛЕНИЕ РЕЖИМА И ЗАГРУЗКА
   useEffect(() => {
     const fetchWorkflow = async () => {
@@ -404,7 +404,7 @@ break;
     });
   };
 
-  // 6. ИЗМЕНЕННОЕ СОХРАНЕНИЕ
+
   const handleSave = async () => {
     try {
       const steps = getOrderedSteps();
@@ -463,12 +463,28 @@ break;
 
       if (!response.ok) throw new Error(await response.text());
       const resData = await response.json();
-      setRunResult(resData); 
+      setRunResult(resData);
+      fetchRunDetails(resData.workflow_id, resData.run_id);
     } catch (err) {
       alert('Ошибка запуска: ' + err.message);
     }
   };
+  const fetchRunDetails = async (workflowId, runId) => {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/runs/${workflowId}/${runId}`
+    );
 
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const data = await response.json();
+    setRunDetails(data);
+  } catch (err) {
+    console.error(err);
+  }
+};
   if (isInitializing) return <div style={{ padding: '20px' }}>Инициализация холста...</div>;
 
   return (
@@ -519,10 +535,44 @@ break;
                 </button>
               </div>
             )}
+            {runResult && (
+  <button
+    onClick={() =>
+      fetchRunDetails(runResult.workflow_id, runResult.run_id)
+    }
+    style={{
+      width: '100%',
+      marginTop: 8,
+      padding: 8
+    }}
+  >
+    Обновить статус
+  </button>
+)}
+{runDetails && (
+  <div
+    style={{
+      marginTop: 10,
+      padding: 10,
+      background: "#eef5ff",
+      borderRadius: 4
+    }}
+  >
+    <div><b>Workflow ID:</b> {runDetails.workflow_id}</div>
+    <div><b>Run ID:</b> {runDetails.run_id}</div>
+    <div><b>Status:</b> {runDetails.status}</div>
+    <div><b>Started:</b> {runDetails.start_time}</div>
+    <div><b>History Lenght:</b>{runDetails.history_length}</div>
+    <div><b>Workflow type:</b>{runDetails.workflow_type}</div>
+
+{runDetails.close_time && (
+  <div><b>Finished:</b> {runDetails.close_time}</div>
+)}
+  </div>
+)}
 
             {runResult && (
               <div style={{ marginTop: '15px', padding: '10px', background: '#f8f9fa', borderRadius: '4px', fontSize: '12px' }}>
-                <p style={{ margin: '0 0 5px 0' }}><b>Status:</b> {runResult.status}</p>
                 <a href={runResult.temporal_ui_url} target="_blank" rel="noreferrer" style={{ color: '#007bff', textDecoration: 'none', fontWeight: 'bold' }}>
                   🔗 Открыть в Temporal UI
                 </a>

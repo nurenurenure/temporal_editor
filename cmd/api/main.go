@@ -228,18 +228,20 @@ func getRunDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := resp.WorkflowExecutionInfo
-
 	result := map[string]any{
 		"workflow_id":    info.Execution.WorkflowId,
 		"run_id":         info.Execution.RunId,
 		"workflow_type":  info.Type.Name,
 		"status":         workflowStatusToString(info.Status),
 		"history_length": info.HistoryLength,
-		"start_time":     info.StartTime.AsTime(),
+	}
+
+	if info.StartTime != nil {
+		result["start_time"] = info.StartTime.AsTime().UTC().Format(time.RFC3339)
 	}
 
 	if info.CloseTime != nil {
-		result["close_time"] = info.CloseTime.AsTime()
+		result["close_time"] = info.CloseTime.AsTime().UTC().Format(time.RFC3339)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -403,7 +405,6 @@ func main() {
 	mux.HandleFunc("GET /api/workflows", getAllWorkflowsHandler)
 	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
-
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)
