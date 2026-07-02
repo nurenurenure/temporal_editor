@@ -317,6 +317,14 @@ traverse(mainSteps);
   return { nodes, edges };
 }
 export default function WorkflowEditor() {
+  const getEventColor = (type) => {
+  if (type.includes('Started')) return '#d4edda';   // светло-зелёный
+  if (type.includes('Completed')) return '#cce5ff'; // светло-синий
+  if (type.includes('Failed') || type.includes('TimedOut') || type.includes('Canceled')) return '#f8d7da'; // светло-красный
+  if (type.includes('Scheduled')) return '#fff3cd'; // светло-жёлтый
+  if (type.includes('Fired')) return '#e2d8f0';     // светло-фиолетовый (для TimerFired)
+  return 'transparent';
+};
   const { id } = useParams(); // Читаем ID из URL (например, /workflows/:id/edit)
   const navigate = useNavigate();
 
@@ -332,6 +340,7 @@ export default function WorkflowEditor() {
   const [runResult, setRunResult] = useState(null);
   const [runDetails, setRunDetails] = useState(null);
   const pollingIntervalRef = useRef(null);
+  const historyIntervalRef = useRef(null);
   const [history, setHistory] = useState(null);
 const [showHistory, setShowHistory] = useState(false);
   
@@ -377,6 +386,22 @@ const [showHistory, setShowHistory] = useState(false);
     useEffect(() => {
     return () => stopPolling();
   }, []);
+  useEffect(() => {
+  if (showHistory && runDetails) {
+    // Загружаем историю сразу
+    fetchHistory(runDetails.workflow_id, runDetails.run_id);
+    // Запускаем интервал обновления каждые 3 секунды
+    historyIntervalRef.current = setInterval(() => {
+      fetchHistory(runDetails.workflow_id, runDetails.run_id);
+    }, 3000);
+  }
+  return () => {
+    if (historyIntervalRef.current) {
+      clearInterval(historyIntervalRef.current);
+      historyIntervalRef.current = null;
+    }
+  };
+}, [showHistory, runDetails]); // зависит от showHistory и runDetails
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
@@ -809,12 +834,12 @@ break;
 {runDetails.close_time && (
   <div><b>Finished:</b> {runDetails.close_time}</div>
 )}
-    <button
-      onClick={() => fetchHistory(runDetails.workflow_id, runDetails.run_id)}
-      style={{ marginTop: 8, padding: 4, cursor: 'pointer' }}
-    >
-      📜 История
-    </button>
+<button
+  onClick={() => setShowHistory(true)}
+  style={{ marginTop: 8, padding: 4, cursor: 'pointer' }}
+>
+  📜 История
+</button>
   </div>
   
 )}
@@ -842,7 +867,7 @@ break;
         </thead>
         <tbody>
           {history.map(ev => (
-            <tr key={ev.eventId} style={{ borderBottom: '1px solid #ddd' }}>
+            <tr key={ev.eventId} style={{ backgroundColor: getEventColor(ev.type), borderBottom: '1px solid #ddd' }}>
               <td style={{ padding: 5 }}>{ev.eventId}</td>
               <td style={{ padding: 5 }}>{ev.timestamp}</td>
               <td style={{ padding: 5 }}>{ev.type}</td>
