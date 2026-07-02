@@ -156,3 +156,21 @@ func UpdateWorkflow(id string, wf *models.Workflow) error {
 
 	return nil
 }
+
+// DeleteWorkflow удаляет воркфлоу по ID
+func DeleteWorkflow(id string) error {
+	query := `DELETE FROM workflows WHERE id = $1;`
+	result, err := DB.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("ошибка удаления из БД: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("воркфлоу с ID %s не найден", id)
+	}
+	return nil
+}

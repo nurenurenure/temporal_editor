@@ -1,26 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 
 export default function WorkflowList() {
   const [workflows, setWorkflows] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchWorkflows = async () => {
-      try {
-        const response = await fetch('http://localhost:8080/api/workflows');
-        if (!response.ok) throw new Error('Ошибка сервера');
-        const data = await response.json();
-        setWorkflows(data || []);
-      } catch (err) {
-        console.error('Ошибка загрузки:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWorkflows();
+  const fetchWorkflows = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/workflows');
+      if (!response.ok) throw new Error('Ошибка сервера');
+      const data = await response.json();
+      setWorkflows(data || []);
+    } catch (err) {
+      console.error('Ошибка загрузки:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchWorkflows();
+  }, [fetchWorkflows]);
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`Вы уверены, что хотите удалить workflow "${name}"?`)) return;
+
+    try {
+      const response = await fetch(`http://localhost:8080/api/workflows/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      // Удаляем из локального состояния
+      setWorkflows((prev) => prev.filter((wf) => wf.id !== id));
+    } catch (err) {
+      alert('Ошибка удаления: ' + err.message);
+    }
+  };
 
   if (loading) return <div style={{ padding: '20px' }}>Загрузка...</div>;
 
@@ -46,13 +61,19 @@ export default function WorkflowList() {
                 <td style={{ padding: '10px' }}><b>{wf.name}</b></td>
                 <td style={{ padding: '10px' }}>{wf.description}</td>
                 <td style={{ padding: '10px', fontSize: '12px', color: '#666' }}>{wf.id}</td>
-                <td style={{ padding: '10px' }}>
+                <td style={{ padding: '10px', display: 'flex', gap: '8px' }}>
                   <Link 
                     to={`/workflows/${wf.id}/edit`} 
                     style={{ background: '#007bff', color: 'white', padding: '5px 10px', textDecoration: 'none', borderRadius: '4px' }}
                   >
-                    Открыть в редакторе
+                    Открыть
                   </Link>
+                  <button 
+                    onClick={() => handleDelete(wf.id, wf.name)}
+                    style={{ background: '#dc3545', color: 'white', padding: '5px 10px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Удалить
+                  </button>
                 </td>
               </tr>
             ))}
@@ -62,4 +83,3 @@ export default function WorkflowList() {
     </div>
   );
 }
-

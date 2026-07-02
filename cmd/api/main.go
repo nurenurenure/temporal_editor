@@ -342,6 +342,38 @@ func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBytes)
 }
 
+// Удаление воркфлоу
+func deleteWorkflowHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "ID не указан", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Удаляем запись из БД
+	if err := database.DeleteWorkflow(id); err != nil {
+		log.Printf("Ошибка удаления из БД: %v", err)
+		http.Error(w, "Не удалось удалить воркфлоу: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Удаляем YAML-файл
+	yamlPath := fmt.Sprintf("./workflows/%s.yaml", id)
+	if err := os.Remove(yamlPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Ошибка удаления файла %s: %v", yamlPath, err)
+		// Файл может отсутствовать – это не критично, но логируем
+	}
+
+	// 3. Перезапускаем Zigflow Worker, чтобы он перечитал директорию workflows
+	go restartZigflowWorker()
+
+	// 4. Ответ об успешном удалении
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Воркфлоу успешно удалён",
+	})
+}
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*") // В проде лучше указать конкретный домен
@@ -405,6 +437,7 @@ func main() {
 	mux.HandleFunc("GET /api/workflows", getAllWorkflowsHandler)
 	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
+	mux.HandleFunc("DELETE /api/workflows/{id}", deleteWorkflowHandler)
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)
