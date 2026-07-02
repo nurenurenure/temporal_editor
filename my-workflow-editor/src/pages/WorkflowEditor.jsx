@@ -65,7 +65,19 @@ function stepsToGraph(steps) {
   const nodes = [];
   const edges = [];
 
-  // Вспомогательная функция конвертации вложенных структур Zigflow в формат {name, body}
+  // 1. Строим карту определений workflow: name -> массив шагов
+  const workflowDefs = {};
+  const mainSteps = [];
+
+  for (const step of steps) {
+    if (step.body && step.body.do) {
+      workflowDefs[step.name] = step.body.do;
+    } else {
+      mainSteps.push(step);
+    }
+  }
+
+  // Вспомогательная функция для конвертации [ {name, body} ] -> [ {name: body} ]
   const mapRawSteps = (rawArray) => {
     if (!Array.isArray(rawArray)) return [];
     return rawArray.map(obj => {
@@ -73,10 +85,11 @@ function stepsToGraph(steps) {
       return { name, body: obj[name] };
     });
   };
-  const additionalWorkflows = [];
-  function traverse(stepList, parentId = null, sourceHandle = null, startX = 250, startY = 50) {
-    if (!stepList || stepList.length === 0) return { lastId: parentId, maxY: startY };
 
+  // Множество использованных определений (чтобы не дублировать)
+  const usedDefs = new Set();
+
+  function traverse(stepList, parentId = null, sourceHandle = null, startX = 250, startY = 50) {
     let currentParentId = parentId;
     let currentY = startY;
     let currentX = startX;
@@ -108,35 +121,63 @@ function stepsToGraph(steps) {
           target: nodeId,
           ...(sourceHandle ? { sourceHandle } : {})
         });
-        sourceHandle = null; 
+        sourceHandle = null;
       }
 
       currentParentId = nodeId;
       currentY += 150;
       maxY = Math.max(maxY, currentY);
 
-      if (nodeType === 'parallel') {
-        const branches = stepBody.fork?.branches || [];
-        const lastBranchIds = [];
+      // Обработка switch
+      if (nodeType === 'switch') {
+        const branches = stepBody.switch || [];
         const branchWidth = 250;
         const startBranchX = currentX - ((branches.length - 1) * branchWidth) / 2;
         let maxBranchY = currentY;
+        const lastBranchIds = [];
 
-        branches.forEach((branchObj, idx) => {
+        for (let idx = 0; idx < branches.length; idx++) {
+          const branchObj = branches[idx];
           const branchKey = Object.keys(branchObj)[0];
-          const rawBranchSteps = branchObj[branchKey]?.do || [];
-          const branchSteps = mapRawSteps(rawBranchSteps);
-          
-          const bX = startBranchX + idx * branchWidth;
-          const res = traverse(branchSteps, nodeId, null, bX, currentY);
-          
-          if (res.lastId && res.lastId !== nodeId) {
+          const branch = branchObj[branchKey];
+          const thenTarget = branch.then || branchKey;
+
+          // Создаём узел ветки (показывает имя then)
+          const branchNodeId = getId();
+          nodes.push({
+            id: branchNodeId,
+            type: 'workflow',
+            position: { x: startBranchX + idx * branchWidth, y: currentY },
+            data: {
+              stepName: thenTarget,          // шаг в ветке будет носить имя then
+              type: 'switchCase',
+              body: JSON.stringify(branch, null, 2)
+            }
+          });
+          edges.push({
+            id: `e_${nodeId}-${branchNodeId}`,
+            source: nodeId,
+            target: branchNodeId
+          });
+
+          // Если есть прямое do (редко), берём его, иначе ищем в определениях
+          let branchSteps = [];
+          if (branch.do) {
+            branchSteps = mapRawSteps(branch.do);
+          } else if (thenTarget && workflowDefs[thenTarget]) {
+            branchSteps = mapRawSteps(workflowDefs[thenTarget]);
+            usedDefs.add(thenTarget);
+          }
+
+          // Рекурсивно отрисовываем шаги ветки
+          const res = traverse(branchSteps, branchNodeId, null, startBranchX + idx * branchWidth, currentY + 150);
+          if (res.lastId && res.lastId !== branchNodeId) {
             lastBranchIds.push(res.lastId);
           }
           maxBranchY = Math.max(maxBranchY, res.maxY);
-        });
+        }
 
-        // Создаем Join узел
+        // Точка слияния (join)
         const joinNodeId = getId();
         currentY = maxBranchY + 50;
         nodes.push({
@@ -144,12 +185,11 @@ function stepsToGraph(steps) {
           type: 'workflow',
           position: { x: currentX, y: currentY },
           data: {
-            stepName: `join_${Math.floor(Math.random()*1000)}`,
+            stepName: `join_${Math.floor(Math.random() * 1000)}`,
             type: 'join',
             body: '{\n  "join": {}\n}'
           }
         });
-
         lastBranchIds.forEach(bId => {
           edges.push({ id: `e_${bId}-${joinNodeId}`, source: bId, target: joinNodeId });
         });
@@ -157,99 +197,49 @@ function stepsToGraph(steps) {
         currentParentId = joinNodeId;
         currentY += 150;
         maxY = Math.max(maxY, currentY);
-      } 
-      else if (nodeType === 'switch') {
-
-  const branches = stepBody.switch || [];
-
-  const branchWidth = 250;
-  const startBranchX =
-    currentX - ((branches.length - 1) * branchWidth) / 2;
-
-  let maxBranchY = currentY;
-  const lastBranchIds = [];
-
-  branches.forEach((branchObj, idx) => {
-
-    const branchName = Object.keys(branchObj)[0];
-    const branch = branchObj[branchName];
-
-    const branchNodeId = getId();
-
-    nodes.push({
-      id: branchNodeId,
-      type: "workflow",
-      position: {
-        x: startBranchX + idx * branchWidth,
-        y: currentY
-      },
-      data: {
-        stepName: branchName,
-        type: "switchCase",
-        body: JSON.stringify(branch, null, 2)
       }
-    });
+      // Обработка parallel (fork)
+      else if (nodeType === 'parallel') {
+        const branches = stepBody.fork?.branches || [];
+        const lastBranchIds = [];
+        const branchWidth = 250;
+        const startBranchX = currentX - ((branches.length - 1) * branchWidth) / 2;
+        let maxBranchY = currentY;
 
-    edges.push({
-      id: `e_${nodeId}_${branchNodeId}`,
-      source: nodeId,
-      target: branchNodeId
-    });
+        for (let idx = 0; idx < branches.length; idx++) {
+          const branchObj = branches[idx];
+          const branchKey = Object.keys(branchObj)[0];
+          const rawBranchSteps = branchObj[branchKey]?.do || [];
+          const branchSteps = mapRawSteps(rawBranchSteps);
+          
+          const bX = startBranchX + idx * branchWidth;
+          const res = traverse(branchSteps, nodeId, null, bX, currentY);
+          if (res.lastId && res.lastId !== nodeId) {
+            lastBranchIds.push(res.lastId);
+          }
+          maxBranchY = Math.max(maxBranchY, res.maxY);
+        }
 
-    const rawSteps = branch.do || [];
-    const branchSteps = mapRawSteps(rawSteps);
+        const joinNodeId = getId();
+        currentY = maxBranchY + 50;
+        nodes.push({
+          id: joinNodeId,
+          type: 'workflow',
+          position: { x: currentX, y: currentY },
+          data: {
+            stepName: `join_${Math.floor(Math.random() * 1000)}`,
+            type: 'join',
+            body: '{\n  "join": {}\n}'
+          }
+        });
+        lastBranchIds.forEach(bId => {
+          edges.push({ id: `e_${bId}-${joinNodeId}`, source: bId, target: joinNodeId });
+        });
 
-    // сохраняем отдельный workflow
-    additionalWorkflows.push({
-      name: branchName,
-      steps: branchSteps
-    });
-
-    const res = traverse(
-      branchSteps,
-      branchNodeId,
-      null,
-      startBranchX + idx * branchWidth,
-      currentY + 150
-    );
-
-    lastBranchIds.push(res.lastId);
-
-    maxBranchY = Math.max(maxBranchY, res.maxY);
-
-  });
-
-  const joinNodeId = getId();
-
-  currentY = maxBranchY + 50;
-
-  nodes.push({
-    id: joinNodeId,
-    type: "workflow",
-    position: {
-      x: currentX,
-      y: currentY
-    },
-    data: {
-      stepName: "join",
-      type: "join",
-      body: "{}"
-    }
-  });
-
-  lastBranchIds.forEach(id => {
-
-    edges.push({
-      id: `e_${id}_${joinNodeId}`,
-      source: id,
-      target: joinNodeId
-    });
-
-  });
-
-  currentParentId = joinNodeId;
-  currentY += 150;
-}
+        currentParentId = joinNodeId;
+        currentY += 150;
+        maxY = Math.max(maxY, currentY);
+      }
       else if (nodeType === 'tryCatch') {
         // Парсим try
         const rawTrySteps = stepBody.try?.do || stepBody.try || [];
@@ -268,17 +258,16 @@ function stepsToGraph(steps) {
         currentY = maxChildY;
         maxY = Math.max(maxY, currentY);
         
-        // В нашей реализации getOrderedSteps на tryCatch происходит break линейного потока
         break; 
       }
     }
     return { lastId: currentParentId, maxY: maxY };
   }
+traverse(mainSteps);
 
-  traverse(steps);
+
   return { nodes, edges };
 }
-
 export default function WorkflowEditor() {
   const { id } = useParams(); // Читаем ID из URL (например, /workflows/:id/edit)
   const navigate = useNavigate();
