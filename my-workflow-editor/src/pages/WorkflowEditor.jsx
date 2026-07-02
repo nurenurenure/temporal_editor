@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactFlow, { 
   Background, 
@@ -331,6 +331,8 @@ export default function WorkflowEditor() {
   const [runPayload, setRunPayload] = useState('{\n  "data": [\n    {\n      "orderType": "electronic"\n    }\n  ]\n}');
   const [runResult, setRunResult] = useState(null);
   const [runDetails, setRunDetails] = useState(null);
+  const pollingIntervalRef = useRef(null);
+  
   // 1. ОПРЕДЕЛЕНИЕ РЕЖИМА И ЗАГРУЗКА
   useEffect(() => {
     const fetchWorkflow = async () => {
@@ -370,11 +372,20 @@ export default function WorkflowEditor() {
 
     fetchWorkflow();
   }, [id]);
+    useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
   const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), []);
 
+  const stopPolling = () => {
+  if (pollingIntervalRef.current) {
+    clearInterval(pollingIntervalRef.current);
+    pollingIntervalRef.current = null;
+  }
+};
   const addNode = () => {
     setNodes((nds) => {
       const lastNode = nds[nds.length - 1];
@@ -650,36 +661,43 @@ break;
   };
 
   const handleRun = async () => {
-    if (!workflowId) {
-      alert('Сначала нужно сохранить (Deploy) workflow!');
+  if (!workflowId) {
+    alert('Сначала нужно сохранить (Deploy) workflow!');
+    return;
+  }
+
+  let parsedPayload = { data: [] };
+  if (runPayload.trim()) {
+    try {
+      parsedPayload = JSON.parse(runPayload);
+    } catch (e) {
+      alert('Ошибка валидации входных данных (JSON): ' + e.message);
       return;
     }
+  }
 
-    let parsedPayload = { data: [] }; 
-    if (runPayload.trim()) {
-      try {
-        parsedPayload = JSON.parse(runPayload);
-      } catch (e) {
-        alert('Ошибка валидации входных данных (JSON): ' + e.message);
-        return;
-      }
-    }
+  try {
+    const response = await fetch(`http://localhost:8080/api/workflows/${workflowId}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsedPayload),
+    });
 
-    try {
-      const response = await fetch(`http://localhost:8080/api/workflows/${workflowId}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsedPayload),
-      });
-
-      if (!response.ok) throw new Error(await response.text());
-      const resData = await response.json();
-      setRunResult(resData);
+    if (!response.ok) throw new Error(await response.text());
+    const resData = await response.json();
+    setRunResult(resData);
+    // Останавливаем предыдущий опрос, если был
+    stopPolling();
+    // Запускаем опрос каждые 3 секунды
+    pollingIntervalRef.current = setInterval(() => {
       fetchRunDetails(resData.workflow_id, resData.run_id);
-    } catch (err) {
-      alert('Ошибка запуска: ' + err.message);
-    }
-  };
+    }, 3000);
+    // Сразу получаем первые детали
+    fetchRunDetails(resData.workflow_id, resData.run_id);
+  } catch (err) {
+    alert('Ошибка запуска: ' + err.message);
+  }
+};
   const fetchRunDetails = async (workflowId, runId) => {
   try {
     const response = await fetch(
@@ -692,8 +710,15 @@ break;
 
     const data = await response.json();
     setRunDetails(data);
+
+    // Если статус конечный, останавливаем опрос
+    const terminalStatuses = ['COMPLETED', 'FAILED', 'TERMINATED', 'TIMED_OUT', 'CANCELED'];
+    if (terminalStatuses.includes(data.status)) {
+      stopPolling();
+    }
   } catch (err) {
     console.error(err);
+    stopPolling(); // при ошибке тоже останавливаем
   }
 };
   if (isInitializing) return <div style={{ padding: '20px' }}>Инициализация холста...</div>;
@@ -747,19 +772,8 @@ break;
                 </button>
               </div>
             )}
-            {runResult && (
-  <button
-    onClick={() =>
-      fetchRunDetails(runResult.workflow_id, runResult.run_id)
-    }
-    style={{
-      width: '100%',
-      marginTop: 8,
-      padding: 8
-    }}
-  >
-    Обновить статус
-  </button>
+            {runResult && pollingIntervalRef.current &&(
+                <p style={{ fontSize: 12, color: '#555', margin: '5px 0' }}>🔄 Автообновление...</p>
 )}
 {runDetails && (
   <div
