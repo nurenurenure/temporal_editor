@@ -310,6 +310,39 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// getWorkflowHistoryHandler возвращает историю событий выполнения workflow
+func getWorkflowHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	workflowID := r.PathValue("workflowId")
+	runID := r.PathValue("runId")
+
+	iter := temporalClient.GetWorkflowHistory(
+		context.Background(),
+		workflowID,
+		runID,
+		false, // не ждать новые события
+		enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT,
+	)
+
+	var events []map[string]interface{}
+	for iter.HasNext() {
+		event, err := iter.Next()
+		if err != nil {
+			http.Error(w, "Ошибка чтения истории: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		events = append(events, map[string]interface{}{
+			"eventId":   event.EventId,
+			"timestamp": event.EventTime.AsTime().UTC().Format(time.RFC3339),
+			"type":      event.EventType.String(),
+			// Можно добавить детали в зависимости от типа события
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"events": events,
+	})
+}
 func getWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	log.Printf("1. Получен GET запрос для ID: %s", id)
@@ -438,6 +471,7 @@ func main() {
 	mux.HandleFunc("PUT /api/workflows/{id}", updateWorkflowHandler)
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
 	mux.HandleFunc("DELETE /api/workflows/{id}", deleteWorkflowHandler)
+	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}/history", getWorkflowHistoryHandler)
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)

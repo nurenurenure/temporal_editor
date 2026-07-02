@@ -332,6 +332,8 @@ export default function WorkflowEditor() {
   const [runResult, setRunResult] = useState(null);
   const [runDetails, setRunDetails] = useState(null);
   const pollingIntervalRef = useRef(null);
+  const [history, setHistory] = useState(null);
+const [showHistory, setShowHistory] = useState(false);
   
   // 1. ОПРЕДЕЛЕНИЕ РЕЖИМА И ЗАГРУЗКА
   useEffect(() => {
@@ -405,7 +407,19 @@ export default function WorkflowEditor() {
       return nds.concat(newNode);
     });
   };
-
+  const fetchHistory = async (workflowId, runId) => {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/runs/${workflowId}/${runId}/history`
+    );
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    setHistory(data.events);
+    setShowHistory(true);
+  } catch (err) {
+    alert('Ошибка загрузки истории: ' + err.message);
+  }
+};
   const onNodeClick = (_, node) => setSelectedNode(node);
   const onPaneClick = () => setSelectedNode(null);
 
@@ -783,6 +797,7 @@ break;
       background: "#eef5ff",
       borderRadius: 4
     }}
+
   >
     <div><b>Workflow ID:</b> {runDetails.workflow_id}</div>
     <div><b>Run ID:</b> {runDetails.run_id}</div>
@@ -794,6 +809,48 @@ break;
 {runDetails.close_time && (
   <div><b>Finished:</b> {runDetails.close_time}</div>
 )}
+    <button
+      onClick={() => fetchHistory(runDetails.workflow_id, runDetails.run_id)}
+      style={{ marginTop: 8, padding: 4, cursor: 'pointer' }}
+    >
+      📜 История
+    </button>
+  </div>
+  
+)}
+{showHistory && history && (
+  <div style={{
+    position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+    background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center',
+    alignItems: 'center', zIndex: 1000
+  }}>
+    <div style={{
+      background: 'white', padding: 20, borderRadius: 8, maxWidth: 800, width: '90%',
+      maxHeight: '80vh', overflowY: 'auto'
+    }}>
+      <h3>История выполнения</h3>
+      <button onClick={() => setShowHistory(false)} style={{ float: 'right', cursor: 'pointer' }}>
+        ✖ Закрыть
+      </button>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 10 }}>
+        <thead>
+          <tr style={{ background: '#f0f0f0' }}>
+            <th style={{ padding: 5 }}>ID</th>
+            <th style={{ padding: 5 }}>Время</th>
+            <th style={{ padding: 5 }}>Тип события</th>
+          </tr>
+        </thead>
+        <tbody>
+          {history.map(ev => (
+            <tr key={ev.eventId} style={{ borderBottom: '1px solid #ddd' }}>
+              <td style={{ padding: 5 }}>{ev.eventId}</td>
+              <td style={{ padding: 5 }}>{ev.timestamp}</td>
+              <td style={{ padding: 5 }}>{ev.type}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   </div>
 )}
 
