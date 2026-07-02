@@ -73,7 +73,7 @@ function stepsToGraph(steps) {
       return { name, body: obj[name] };
     });
   };
-
+  const additionalWorkflows = [];
   function traverse(stepList, parentId = null, sourceHandle = null, startX = 250, startY = 50) {
     if (!stepList || stepList.length === 0) return { lastId: parentId, maxY: startY };
 
@@ -158,6 +158,98 @@ function stepsToGraph(steps) {
         currentY += 150;
         maxY = Math.max(maxY, currentY);
       } 
+      else if (nodeType === 'switch') {
+
+  const branches = stepBody.switch || [];
+
+  const branchWidth = 250;
+  const startBranchX =
+    currentX - ((branches.length - 1) * branchWidth) / 2;
+
+  let maxBranchY = currentY;
+  const lastBranchIds = [];
+
+  branches.forEach((branchObj, idx) => {
+
+    const branchName = Object.keys(branchObj)[0];
+    const branch = branchObj[branchName];
+
+    const branchNodeId = getId();
+
+    nodes.push({
+      id: branchNodeId,
+      type: "workflow",
+      position: {
+        x: startBranchX + idx * branchWidth,
+        y: currentY
+      },
+      data: {
+        stepName: branchName,
+        type: "switchCase",
+        body: JSON.stringify(branch, null, 2)
+      }
+    });
+
+    edges.push({
+      id: `e_${nodeId}_${branchNodeId}`,
+      source: nodeId,
+      target: branchNodeId
+    });
+
+    const rawSteps = branch.do || [];
+    const branchSteps = mapRawSteps(rawSteps);
+
+    // сохраняем отдельный workflow
+    additionalWorkflows.push({
+      name: branchName,
+      steps: branchSteps
+    });
+
+    const res = traverse(
+      branchSteps,
+      branchNodeId,
+      null,
+      startBranchX + idx * branchWidth,
+      currentY + 150
+    );
+
+    lastBranchIds.push(res.lastId);
+
+    maxBranchY = Math.max(maxBranchY, res.maxY);
+
+  });
+
+  const joinNodeId = getId();
+
+  currentY = maxBranchY + 50;
+
+  nodes.push({
+    id: joinNodeId,
+    type: "workflow",
+    position: {
+      x: currentX,
+      y: currentY
+    },
+    data: {
+      stepName: "join",
+      type: "join",
+      body: "{}"
+    }
+  });
+
+  lastBranchIds.forEach(id => {
+
+    edges.push({
+      id: `e_${id}_${joinNodeId}`,
+      source: id,
+      target: joinNodeId
+    });
+
+  });
+
+  currentParentId = joinNodeId;
+  currentY += 150;
+}
       else if (nodeType === 'tryCatch') {
         // Парсим try
         const rawTrySteps = stepBody.try?.do || stepBody.try || [];
@@ -324,6 +416,38 @@ export default function WorkflowEditor() {
       }
       return null;
     };
+    const findSwitchEndNode = (switchId) => {
+  const outEdges = edges.filter(e => e.source === switchId);
+
+  if (outEdges.length === 0) return null;
+
+  let common = null;
+
+  for (const edge of outEdges) {
+    let queue = [edge.target];
+    let visited = new Set();
+
+    while (queue.length) {
+      const id = queue.shift();
+
+      if (visited.has(id)) continue;
+      visited.add(id);
+
+      const incoming = edges.filter(e => e.target === id);
+
+      if (incoming.length > 1) {
+        if (!common) common = id;
+        else if (common === id) return id;
+      }
+
+      edges
+        .filter(e => e.source === id)
+        .forEach(e => queue.push(e.target));
+    }
+  }
+
+  return common;
+};
 
     const buildNativeSequence = (startNodeId, visited = new Set(), stopNodeId = null) => {
       let currentId = startNodeId;
@@ -381,6 +505,56 @@ break;
           sequence.push({ [node.data.stepName]: stepBody });
           break; 
         }
+        else if (node.data?.type === 'switch') {
+    const switchEnd = findSwitchEndNode(currentId);
+    const body = JSON.parse(node.data.body || "{}");
+    const conditions = body.switch || [];
+
+    // Собираем все условия (ветки) без фильтрации по наличию рёбер
+    const branches = conditions.map(cond => {
+        const key = Object.keys(cond)[0];       // electronic / default и т.д.
+        const value = cond[key];
+        return {
+            [key]: {
+                when: value.when || undefined,
+                then: value.then || key,
+            }
+        };
+    });
+
+    // Добавляем сам switch
+    sequence.push({
+        [node.data.stepName]: {
+            switch: branches
+        }
+    });
+
+    // Извлекаем уникальные then‑значения (имена подпроцессов)
+    const thenNames = new Set(branches.map(b => Object.values(b)[0].then));
+
+    for (const thenName of thenNames) {
+        // flow‑директивы не нуждаются в объявлении отдельного workflow
+        if (['continue', 'exit', 'end'].includes(thenName)) continue;
+
+        // Ищем узел, имя которого совпадает с then
+        const targetNode = nodes.find(n => n.data?.stepName === thenName);
+        if (targetNode) {
+            const subDo = buildNativeSequence(
+                targetNode.id,
+                new Set(visited),
+                switchEnd
+            );
+            sequence.push({ [thenName]: { do: subDo } });
+        } else {
+            // Если узел не найден, создаём пустой workflow (заглушку)
+            sequence.push({ [thenName]: { do: [] } });
+        }
+    }
+
+    // Переходим к шагу после слияния
+    currentId = switchEnd;
+    continue;
+}
         else {
           try {
             stepBody = JSON.parse(node.data.body || '{}');
