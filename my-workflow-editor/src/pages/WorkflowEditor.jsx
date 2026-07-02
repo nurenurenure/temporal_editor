@@ -710,6 +710,7 @@ break;
           onConnect={onConnect}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
+          deleteKeyCode={['Backspace', 'Delete']} 
           fitView
         >
           <Background />
