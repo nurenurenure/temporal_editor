@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 )
 
 var temporalClient client.Client
+var workflowDir = "/app/workflows"
 
 var (
 	workerCmd *exec.Cmd
@@ -37,24 +37,22 @@ func restartZigflowWorker() {
 
 	fmt.Println("🔄 Перезапуск Zigflow Worker...")
 
-	// Абсолютный путь к папке workflows
-	workflowDir, err := filepath.Abs("./workflows")
-	if err != nil {
-		fmt.Printf("❌ Не удалось получить путь к workflows: %v\n", err)
-		return
+	hostWorkflowDir := os.Getenv("HOST_WORKFLOWS_DIR")
+	if hostWorkflowDir == "" {
+		hostWorkflowDir = "./workflows"
 	}
 
-	// Останавливаем старый контейнер (если есть)
-	exec.Command("docker", "stop", "zigflow-worker").Run()
-	exec.Command("docker", "rm", "zigflow-worker").Run()
+	// 🔥 ИСПРАВЛЕНИЕ: Жестко и мгновенно удаляем старый контейнер,
+	// отправляя SIGKILL, чтобы он гарантированно освободил сеть:
+	exec.Command("docker", "rm", "-f", "zigflow-worker").Run()
 
 	workerCmd = exec.Command(
 		"docker",
 		"run",
-		"--rm",
+		"--rm", // Флаг --rm автоматически удалит контейнер с диска, как только он завершится
 		"--name", "zigflow-worker",
 		"--network", "local-temporal-network",
-		"-v", fmt.Sprintf("%s:/app/workflows", workflowDir),
+		"-v", fmt.Sprintf("%s:/app/workflows", hostWorkflowDir),
 		"ghcr.io/zigflow/zigflow",
 		"run",
 		"--file", "",
@@ -294,7 +292,7 @@ func createWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Сохраняем файл
-	yamlPath := fmt.Sprintf("./workflows/%s.yaml", wf.ID)
+	yamlPath := fmt.Sprintf("%s/%s.yaml", workflowDir, wf.ID)
 	if err := os.WriteFile(yamlPath, yamlData, 0644); err != nil {
 		http.Error(w, "Ошибка записи файла: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -442,23 +440,42 @@ func workflowStatusToString(status enumspb.WorkflowExecutionStatus) string {
 	}
 }
 
+func mustConnectDB(connStr string) {
+	for {
+		err := database.InitDB(connStr)
+		if err == nil {
+			fmt.Println("Postgres connected")
+			return
+		}
+
+		fmt.Println("DB not ready, retry in 3s:", err)
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func mustConnectTemporal() client.Client {
+	for i := 0; i < 30; i++ {
+		c, err := client.Dial(client.Options{
+			HostPort: "temporal:7233",
+		})
+		if err == nil {
+			fmt.Println("Temporal connected")
+			return c
+		}
+
+		fmt.Println("Temporal not ready, retry in 2s:", err)
+		time.Sleep(2 * time.Second)
+	}
+
+	log.Fatal("Temporal unavailable after retries")
+	return nil
+}
 func main() {
 	// Инициализируем базу данных
-	connStr := "host=localhost port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
-	if err := database.InitDB(connStr); err != nil {
-		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
-	}
-	fmt.Println("Успешное подключение к Postgres!")
-
-	// Инициализируем Temporal Client
-	c, err := client.Dial(client.Options{
-		HostPort: "localhost:7233",
-	})
-	if err != nil {
-		log.Fatalln("Не удалось создать Temporal client:", err)
-	}
-	defer c.Close() // Закроем соединение при завершении работы программы
-	temporalClient = c
+	connStr := "host=postgresql port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
+	mustConnectDB(connStr)
+	temporalClient = mustConnectTemporal()
+	defer temporalClient.Close() // Закрываем глобальный клиент при выходе
 	fmt.Println("Успешное подключение к Temporal!")
 	go restartZigflowWorker()
 

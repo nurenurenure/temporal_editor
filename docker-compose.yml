@@ -1,9 +1,13 @@
 networks:
   local-temporal-network:
+    name: local-temporal-network  
     driver: bridge
-    name: local-temporal-network
+
+volumes:
+  postgres_data: # Именованный том для сохранения данных БД
 
 services:
+
   postgresql:
     image: postgres:15-alpine
     container_name: temporal-postgres
@@ -11,20 +15,20 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
       POSTGRES_DB: temporal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data 
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - local-temporal-network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   temporal:
+    image: temporalio/auto-setup:1.27.1
     container_name: temporal
     depends_on:
       postgresql:
@@ -36,28 +40,64 @@ services:
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=postgresql
-      - PROMETHEUS_ENDPOINT=0.0.0.0:8000
-    image: temporalio/auto-setup:1.27.1
-    networks:
-      - local-temporal-network
     ports:
       - "7233:7233"
-      - "8000:8000"
-    restart: unless-stopped
+    networks:
+      - local-temporal-network
 
   temporal-ui:
+    image: temporalio/ui:2.36.0
     container_name: temporal-ui
     depends_on:
       - temporal
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
-    image: temporalio/ui:2.36.0
-    networks:
-      - local-temporal-network
     ports:
       - "8233:8080"
-    restart: unless-stopped
+    networks:
+      - local-temporal-network
 
-volumes:
-  postgres_data:
+  backend:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    container_name: backend
+    ports:
+      - "8080:8080"
+    environment:
+      - HOST_WORKFLOWS_DIR=${PWD}/workflows
+    volumes:
+      - ./workflows:/app/workflows
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    networks:
+      - local-temporal-network
+
+  zigflow-worker:
+    image: ghcr.io/zigflow/zigflow
+    container_name: zigflow-worker
+    volumes:
+      - ./workflows:/app/workflows
+    command: >
+      run
+      --dir /app/workflows
+      --temporal-address temporal:7233
+    depends_on:
+      - temporal
+    networks:
+      - local-temporal-network
+
+  frontend:
+    build:
+      context: ./my-workflow-editor
+    container_name: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - local-temporal-network 
