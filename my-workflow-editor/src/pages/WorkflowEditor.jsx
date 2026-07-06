@@ -316,6 +316,125 @@ traverse(mainSteps);
 
   return { nodes, edges };
 }
+const validateGraph = (nodes, edges) => {
+  const errors = [];
+
+  // Стартовые узлы
+  const targetIds = new Set(edges.map(e => e.target));
+  const startNodes = nodes.filter(n => !targetIds.has(n.id));
+  if (startNodes.length === 0) {
+    errors.push({ message: 'Нет стартового узла (без входящих рёбер).' });
+  } else if (startNodes.length > 1) {
+    const names = startNodes.map(n => n.data?.stepName || n.id).join(', ');
+    errors.push({ message: `Несколько стартовых узлов: ${names}. Должен быть один основной поток.` });
+  }
+
+  // Проверка циклов (DFS)
+  const state = {};
+  nodes.forEach(n => state[n.id] = 0);
+  const hasCycle = (nodeId) => {
+    if (state[nodeId] === 1) return true;
+    if (state[nodeId] === 2) return false;
+    state[nodeId] = 1;
+    const outEdges = edges.filter(e => e.source === nodeId);
+    for (let edge of outEdges) {
+      if (hasCycle(edge.target)) return true;
+    }
+    state[nodeId] = 2;
+    return false;
+  };
+  if (startNodes.length > 0 && hasCycle(startNodes[0].id)) {
+    errors.push({ message: 'Обнаружен цикл в графе.' });
+  }
+
+  // Достижимость всех узлов из стартового
+  if (startNodes.length > 0) {
+    const reachable = new Set();
+    const dfs = (nodeId) => {
+      if (reachable.has(nodeId)) return;
+      reachable.add(nodeId);
+      edges.filter(e => e.source === nodeId).forEach(e => dfs(e.target));
+    };
+    dfs(startNodes[0].id);
+    const unreachable = nodes.filter(n => !reachable.has(n.id));
+    if (unreachable.length > 0) {
+      const names = unreachable.map(n => n.data?.stepName || n.id).join(', ');
+      errors.push({ message: `Несвязанные узлы: ${names}.` });
+    }
+  }
+
+  // Уникальность имён шагов
+  const nameCounts = {};
+  nodes.forEach(n => {
+    const name = n.data?.stepName;
+    if (name) nameCounts[name] = (nameCounts[name] || 0) + 1;
+  });
+  const duplicates = Object.entries(nameCounts).filter(([, c]) => c > 1).map(([n]) => n);
+  if (duplicates.length > 0) {
+    errors.push({ message: `Дублирующиеся имена шагов: ${duplicates.join(', ')}.` });
+  }
+
+  // Проверки по типам узлов
+  nodes.forEach(node => {
+    const outEdges = edges.filter(e => e.source === node.id);
+    const data = node.data;
+    if (!data) return;
+
+    switch (data.type) {
+      case 'parallel':
+        if (outEdges.length < 2) {
+          errors.push({ message: `Узел '${data.stepName}' (parallel) должен иметь ≥2 исходящие связи.` });
+        }
+        break;
+
+      case 'switch': {
+        let body;
+        try {
+          body = JSON.parse(data.body || '{}');
+        } catch {
+          errors.push({ message: `Узел '${data.stepName}' (switch): некорректный JSON.` });
+          break;
+        }
+        const branches = body.switch || [];
+        if (branches.length === 0) {
+          errors.push({ message: `Узел '${data.stepName}' (switch): нет ни одного условия.` });
+        }
+        branches.forEach(branch => {
+          const key = Object.keys(branch)[0];
+          const thenTarget = branch[key]?.then;
+          if (!thenTarget) {
+            errors.push({ message: `Ветка '${key}' switch '${data.stepName}' не содержит 'then'.` });
+          } else if (!['continue', 'exit', 'end'].includes(thenTarget) && !nodes.some(n => n.data?.stepName === thenTarget)) {
+            errors.push({ message: `Для ветки '${key}' switch '${data.stepName}' не найден узел '${thenTarget}'.` });
+          }
+        });
+        break;
+      }
+
+      case 'tryCatch':
+        if (!outEdges.some(e => e.sourceHandle === 'try')) {
+          errors.push({ message: `Узел '${data.stepName}' (tryCatch) не имеет ветки try.` });
+        }
+        if (!outEdges.some(e => e.sourceHandle === 'catch')) {
+          errors.push({ message: `Узел '${data.stepName}' (tryCatch) не имеет ветки catch.` });
+        }
+        break;
+
+      case 'join':
+        if (outEdges.length > 1) {
+          errors.push({ message: `Узел join '${data.stepName}' не должен иметь более одного исходящего ребра.` });
+        }
+        break;
+
+      default:
+        if (!['parallel', 'switch', 'tryCatch', 'join'].includes(data.type) && outEdges.length > 1) {
+          errors.push({ message: `Узел '${data.stepName}' имеет >1 исходящих рёбер, что недопустимо для типа ${data.type}.` });
+        }
+    }
+  });
+
+  return errors;
+};
 export default function WorkflowEditor() {
   const getEventColor = (type) => {
   if (type.includes('Started')) return '#d4edda';   // светло-зелёный
@@ -343,6 +462,7 @@ export default function WorkflowEditor() {
   const historyIntervalRef = useRef(null);
   const [history, setHistory] = useState(null);
 const [showHistory, setShowHistory] = useState(false);
+const [validationErrors, setValidationErrors] = useState([]);
   
   // 1. ОПРЕДЕЛЕНИЕ РЕЖИМА И ЗАГРУЗКА
   useEffect(() => {
@@ -386,6 +506,10 @@ const [showHistory, setShowHistory] = useState(false);
     useEffect(() => {
     return () => stopPolling();
   }, []);
+  useEffect(() => {
+  const errors = validateGraph(nodes, edges);
+  setValidationErrors(errors);
+}, [nodes, edges]);
   useEffect(() => {
   if (showHistory && runDetails) {
     // Загружаем историю сразу
@@ -667,6 +791,11 @@ break;
 
 
   const handleSave = async () => {
+      const errors = validateGraph(nodes, edges);
+  if (errors.length > 0) {
+    alert('Граф содержит ошибки:\n\n' + errors.map(e => '• ' + e.message).join('\n'));
+    return;
+  }
     try {
       const steps = getOrderedSteps();
       const payload = { name: workflowName, description: "UI Generated", steps };
@@ -700,6 +829,11 @@ break;
   };
 
   const handleRun = async () => {
+    const errors = validateGraph(nodes, edges);
+if (errors.length > 0) {
+  alert('Граф содержит ошибки. Запуск невозможен.');
+  return;
+}
   if (!workflowId) {
     alert('Сначала нужно сохранить (Deploy) workflow!');
     return;
@@ -792,6 +926,14 @@ break;
               <button onClick={addNode} style={{ flexGrow: 1, padding: '5px' }}>+ Узел</button>
               <button onClick={handleSave} style={{ flexGrow: 1, background: '#007bff', color: 'white', border: 'none', padding: '5px' }}>Deploy</button>
             </div>
+            {validationErrors.length > 0 && (
+  <div style={{ marginTop: 10, padding: 8, background: '#ffe0e0', border: '1px solid red', borderRadius: 4, fontSize: 12 }}>
+    <b>⚠️ Ошибки валидации:</b>
+    <ul style={{ margin: '4px 0 0 15px', paddingLeft: 10 }}>
+      {validationErrors.map((err, i) => <li key={i}>{err.message}</li>)}
+    </ul>
+  </div>
+)}
 
             {workflowId && (
               <div style={{ borderTop: '1px solid #eee', paddingTop: '10px' }}>

@@ -41,15 +41,12 @@ func restartZigflowWorker() {
 	if hostWorkflowDir == "" {
 		hostWorkflowDir = "./workflows"
 	}
-
-	// 🔥 ИСПРАВЛЕНИЕ: Жестко и мгновенно удаляем старый контейнер,
-	// отправляя SIGKILL, чтобы он гарантированно освободил сеть:
 	exec.Command("docker", "rm", "-f", "zigflow-worker").Run()
 
 	workerCmd = exec.Command(
 		"docker",
 		"run",
-		"--rm", // Флаг --rm автоматически удалит контейнер с диска, как только он завершится
+		"--rm",
 		"--name", "zigflow-worker",
 		"--network", "local-temporal-network",
 		"-v", fmt.Sprintf("%s:/app/workflows", hostWorkflowDir),
@@ -142,7 +139,7 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	yamlPath := fmt.Sprintf("./workflows/%s.yaml", id)
+	yamlPath := fmt.Sprintf("/app/workflows/%s.yaml", id)
 	if err := os.WriteFile(yamlPath, yamlData, 0644); err != nil {
 		http.Error(w, "Ошибка перезаписи файла: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -389,7 +386,7 @@ func deleteWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Удаляем YAML-файл
-	yamlPath := fmt.Sprintf("./workflows/%s.yaml", id)
+	yamlPath := fmt.Sprintf("/app/workflows/%s.yaml", id)
 	if err := os.Remove(yamlPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Ошибка удаления файла %s: %v", yamlPath, err)
 		// Файл может отсутствовать – это не критично, но логируем
