@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.temporal.io/sdk/client"
@@ -486,6 +488,23 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
 	mux.HandleFunc("DELETE /api/workflows/{id}", deleteWorkflowHandler)
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}/history", getWorkflowHistoryHandler)
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-stopChan
+		fmt.Println("\n🛑 Получен сигнал остановки. Удаляем воркер...")
+		mu.Lock()
+		// Принудительно гасим контейнер воркера перед выходом бэкенда
+		exec.Command("docker", "rm", "-f", "zigflow-worker").Run()
+		mu.Unlock()
+		os.Exit(0)
+	}()
+
+	fmt.Println("Сервер запущен на http://localhost:8080")
+	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
+		log.Fatal("Ошибка сервера:", err)
+	}
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)

@@ -4,7 +4,7 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data: # Именованный том для сохранения данных БД
+  postgres_data: 
 
 services:
 
@@ -76,21 +76,6 @@ services:
         condition: service_started
     networks:
       - local-temporal-network
-
-  zigflow-worker:
-    image: ghcr.io/zigflow/zigflow
-    container_name: zigflow-worker
-    volumes:
-      - ./workflows:/app/workflows
-    command: >
-      run
-      --dir /app/workflows
-      --temporal-address temporal:7233
-    depends_on:
-      - temporal
-    networks:
-      - local-temporal-network
-
   frontend:
     build:
       context: ./my-workflow-editor
