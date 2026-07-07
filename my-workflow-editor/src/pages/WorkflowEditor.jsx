@@ -26,6 +26,28 @@ const defaultTemplates = {
 
   call_grpc: '{\n  "call": "grpc",\n  "with": {\n    "address": "user-service:50051",\n    "service": "users.UserService",\n    "method": "GetUserProfile",\n    "payload": {\n      "user_id": "${ $input.userId }"\n    }\n  }\n}',
   join: '{\n  "join": {}\n}',
+    listen: JSON.stringify({
+    listen: {
+      to: {
+        one: {
+          with: {
+            id: "approve",
+            type: "signal",
+            acceptIf: "${ $data.approveListener }"
+          }
+        }
+      }
+    }
+  }, null, 2),
+  export: JSON.stringify({
+    export: {
+      as: "${ $context + { response: . } }"
+    },
+    set: {
+      signal: "${ $data.approveListener }"
+    }
+  }, null, 2),
+  
 };
 
 const nodeTypes = {
@@ -58,6 +80,8 @@ function inferNodeType(body) {
   if (body.call === 'http') return 'call_http';
   if (body.call === 'activity') return 'call_activity';
   if (body.call === 'grpc') return 'call_grpc';
+  if (body.listen) return 'listen';
+  if (body.export) return 'export';
   return 'call_http'; // Default
 }
 
@@ -1060,6 +1084,8 @@ if (errors.length > 0) {
             <option value="call_http">call: HTTP (Внешний REST API)</option>
             <option value="call_activity">call: Activity (Код на воркере)</option>
             <option value="call_grpc">call: gRPC (Микросервисы)</option>
+            <option value="listen">listen (Ожидание сигнала)</option>
+            <option value="export">export (Экспорт сигнала)</option>
           </select>
 
           {/* ОБЩЕЕ ПОЛЕ IF (УСЛОВИЕ ВЫПОЛНЕНИЯ) */}
@@ -1093,6 +1119,78 @@ if (errors.length > 0) {
           </div>
 
           <div style={{ marginTop: '15px', padding: '10px', background: '#eee', borderRadius: '4px' }}>
+                      {selectedNode.data.type === 'export' && (() => {
+              let bodyObj = { export: { as: '' }, set: {} };
+              try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e) {}
+              const exportData = bodyObj.export || {};
+              const setData = bodyObj.set || {};
+
+              const updateExportAs = (value) => {
+                const newBody = { ...bodyObj, export: { ...exportData, as: value } };
+                updateNodeData('body', JSON.stringify(newBody, null, 2));
+              };
+
+              const updateSetField = (key, value) => {
+                const newSet = { ...setData, [key]: value };
+                const newBody = { ...bodyObj, set: newSet };
+                updateNodeData('body', JSON.stringify(newBody, null, 2));
+              };
+
+              const addSetField = () => {
+                const newKey = 'new_param';
+                if (setData.hasOwnProperty(newKey)) {
+                  alert('Сначала переименуйте предыдущее поле!');
+                  return;
+                }
+                const newSet = { ...setData, [newKey]: 'значение' };
+                const newBody = { ...bodyObj, set: newSet };
+                updateNodeData('body', JSON.stringify(newBody, null, 2));
+              };
+
+              return (
+                <div>
+                  <label style={{ fontWeight: 'bold' }}>Экспортировать как (as):</label>
+                  <input
+                    type="text"
+                    value={exportData.as || ''}
+                    onChange={(e) => updateExportAs(e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px' }}
+                    placeholder="${ $context + { response: . } }"
+                  />
+                  <label style={{ fontWeight: 'bold' }}>Данные set:</label>
+                  {Object.entries(setData).map(([key, value], index) => (
+                    <div key={index} style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+                      <input
+                        value={key}
+                        placeholder="Ключ"
+                        onChange={(e) => {
+                          const newKey = e.target.value;
+                          if (newKey !== key && setData.hasOwnProperty(newKey)) {
+                            alert('Такой ключ уже есть!');
+                            return;
+                          }
+                          const newSet = { ...setData };
+                          delete newSet[key];
+                          newSet[newKey] = value;
+                          const newBody = { ...bodyObj, set: newSet };
+                          updateNodeData('body', JSON.stringify(newBody, null, 2));
+                        }}
+                        style={{ width: '40%', padding: '4px' }}
+                      />
+                      <input
+                        value={value}
+                        placeholder="Значение"
+                        onChange={(e) => updateSetField(key, e.target.value)}
+                        style={{ width: '60%', padding: '4px' }}
+                      />
+                    </div>
+                  ))}
+                  <button onClick={addSetField} style={{ marginTop: '10px', width: '100%' }}>
+                    + Добавить поле set
+                  </button>
+                </div>
+              );
+            })()}
             {selectedNode.data.type === 'wait' && (
               <div>
                 <label>Секунды:</label>
@@ -1451,6 +1549,59 @@ if (errors.length > 0) {
                 </div>
               );
             })()}
+                        {selectedNode.data.type === 'listen' && (() => {
+              let bodyObj = { listen: { to: { one: { with: { id: '', type: 'signal', acceptIf: '' } } } } };
+              try { bodyObj = JSON.parse(selectedNode.data.body || '{}'); } catch(e) {}
+              const listenWith = bodyObj.listen?.to?.one?.with || {};
+
+              const updateListenField = (field, value) => {
+                const newBody = {
+                  ...bodyObj,
+                  listen: {
+                    ...bodyObj.listen,
+                    to: {
+                      ...bodyObj.listen?.to,
+                      one: {
+                        ...bodyObj.listen?.to?.one,
+                        with: {
+                          ...listenWith,
+                          [field]: value
+                        }
+                      }
+                    }
+                  }
+                };
+                updateNodeData('body', JSON.stringify(newBody, null, 2));
+              };
+
+              return (
+                <div>
+                  <label style={{ fontWeight: 'bold' }}>Имя сигнала (id):</label>
+                  <input
+                    type="text"
+                    value={listenWith.id || ''}
+                    onChange={(e) => updateListenField('id', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px' }}
+                    placeholder="approve"
+                  />
+                  <label style={{ fontWeight: 'bold' }}>Тип (обычно "signal"):</label>
+                  <input
+                    type="text"
+                    value={listenWith.type || 'signal'}
+                    onChange={(e) => updateListenField('type', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px', marginBottom: '12px' }}
+                  />
+                  <label style={{ fontWeight: 'bold' }}>Условие принятия (acceptIf):</label>
+                  <input
+                    type="text"
+                    value={listenWith.acceptIf || ''}
+                    onChange={(e) => updateListenField('acceptIf', e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '5px' }}
+                    placeholder="${ $data.approveListener }"
+                  />
+                </div>
+              );
+            })()}
 
             {['parallel', 'tryCatch'].includes(selectedNode.data.type) && (
               <div style={{ marginTop: '15px', padding: '10px', background: '#e3f2fd', border: '1px solid #2196f3', borderRadius: '4px' }}>
@@ -1556,7 +1707,9 @@ function WorkflowNode({ data }) {
   const colors = {
     set: "#4caf50", wait: "#ff9800", switch: "#9c27b0", for: "#2196f3",
     parallel: "#00bcd4", tryCatch: "#f44336", call_http: "#3f51b5",
-    call_activity: "#607d8b", call_grpc: "#009688", join: "#757575"
+    call_activity: "#607d8b", call_grpc: "#009688", join: "#757575",
+    isten: '#e91e63',   // розовый
+    export: '#ff5722',   // оранжевый
   };
 
   const isTryCatch = data.type === 'tryCatch';
