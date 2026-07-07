@@ -470,15 +470,34 @@ func mustConnectTemporal() client.Client {
 	return nil
 }
 func main() {
-	// Инициализируем базу данных
-	connStr := "host=postgresql port=5432 user=temporal password=temporal dbname=temporal sslmode=disable"
+	// 1. Читаем переменные окружения, переданные из Docker
+	dbUser := os.Getenv("POSTGRES_USER")
+	dbPwd := os.Getenv("POSTGRES_PASSWORD")
+	dbName := os.Getenv("POSTGRES_DB")
+
+	// Делаем фолбеки (запасной вариант), если запускаем код локально без Docker
+	if dbUser == "" {
+		dbUser = "temporal"
+	}
+	if dbPwd == "" {
+		dbPwd = "temporal"
+	}
+	if dbName == "" {
+		dbName = "temporal"
+	}
+
+	// Формируем динамическую строку подключения к базе данных
+	connStr := fmt.Sprintf("host=postgresql port=5432 user=%s password=%s dbname=%s sslmode=disable", dbUser, dbPwd, dbName)
 	mustConnectDB(connStr)
+
 	temporalClient = mustConnectTemporal()
 	defer temporalClient.Close() // Закрываем глобальный клиент при выходе
 	fmt.Println("Успешное подключение к Temporal!")
+
+	// Запускаем воркер
 	go restartZigflowWorker()
 
-	//Настройка маршрутов
+	// Настройка маршрутов
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/workflows", createWorkflowHandler)
 	mux.HandleFunc("GET /api/workflows/{id}", getWorkflowHandler)
@@ -488,6 +507,8 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}", getRunDetailsHandler)
 	mux.HandleFunc("DELETE /api/workflows/{id}", deleteWorkflowHandler)
 	mux.HandleFunc("GET /api/runs/{workflowId}/{runId}/history", getWorkflowHistoryHandler)
+
+	// Перехватываем сигналы остановки для очистки воркера
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
@@ -495,17 +516,12 @@ func main() {
 		<-stopChan
 		fmt.Println("\n🛑 Получен сигнал остановки. Удаляем воркер...")
 		mu.Lock()
-		// Принудительно гасим контейнер воркера перед выходом бэкенда
 		exec.Command("docker", "rm", "-f", "zigflow-worker").Run()
 		mu.Unlock()
 		os.Exit(0)
 	}()
 
-	fmt.Println("Сервер запущен на http://localhost:8080")
-	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
-		log.Fatal("Ошибка сервера:", err)
-	}
-	fmt.Println("Сервер запущен на http://localhost:8080")
+	fmt.Printf("Сервер запущен внутри Docker на порту :8080 (Внешний порт: %s)\n", os.Getenv("BACKEND_PORT"))
 	if err := http.ListenAndServe(":8080", enableCORS(mux)); err != nil {
 		log.Fatal("Ошибка сервера:", err)
 	}
