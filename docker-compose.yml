@@ -17,8 +17,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data 
-    ports:
-      - "${DB_PORT}:5432"
     networks:
       - local-temporal-network
     healthcheck:
@@ -62,8 +60,6 @@ services:
       context: .
       dockerfile: cmd/api/Dockerfile
     container_name: backend
-    ports:
-      - "${BACKEND_PORT}:8080"
     environment:
       # Docker Compose заменит ${PWD} на полный путь хоста еще до старта бэкенда
       - HOST_WORKFLOWS_DIR=${PWD}/workflows 

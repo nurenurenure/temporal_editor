@@ -7,7 +7,7 @@ export default function WorkflowList() {
 
   const fetchWorkflows = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/workflows');
+      const response = await fetch('/api/workflows');
       if (!response.ok) throw new Error('Ошибка сервера');
       const data = await response.json();
       setWorkflows(data || []);
@@ -26,7 +26,7 @@ export default function WorkflowList() {
     if (!window.confirm(`Вы уверены, что хотите удалить workflow "${name}"?`)) return;
 
     try {
-      const response = await fetch(`http://localhost:8080/api/workflows/${id}`, {
+      const response = await fetch(`/api/workflows/${id}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error(await response.text());

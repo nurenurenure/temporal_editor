@@ -478,7 +478,7 @@ const [validationErrors, setValidationErrors] = useState([]);
 
       // Режим редактирования
       try {
-        const response = await fetch(`http://localhost:8080/api/workflows/${id}`);
+        const response = await fetch(`/api/workflows/${id}`);
         if (!response.ok) throw new Error('Ошибка загрузки воркфлоу');
         const wf = await response.json();
 
@@ -559,7 +559,7 @@ const [validationErrors, setValidationErrors] = useState([]);
   const fetchHistory = async (workflowId, runId) => {
   try {
     const response = await fetch(
-      `http://localhost:8080/api/runs/${workflowId}/${runId}/history`
+      `/api/runs/${workflowId}/${runId}/history`
     );
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
@@ -801,8 +801,8 @@ break;
       const payload = { name: workflowName, description: "UI Generated", steps };
       
       const url = workflowId 
-        ? `http://localhost:8080/api/workflows/${workflowId}` 
-        : 'http://localhost:8080/api/workflows';
+        ? `/api/workflows/${workflowId}` 
+        : '/api/workflows';
         
       const method = workflowId ? 'PUT' : 'POST';
 
@@ -850,7 +850,7 @@ if (errors.length > 0) {
   }
 
   try {
-    const response = await fetch(`http://localhost:8080/api/workflows/${workflowId}/run`, {
+    const response = await fetch(`/api/workflows/${workflowId}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(parsedPayload),
@@ -874,7 +874,7 @@ if (errors.length > 0) {
   const fetchRunDetails = async (workflowId, runId) => {
   try {
     const response = await fetch(
-      `http://localhost:8080/api/runs/${workflowId}/${runId}`
+      `/api/runs/${workflowId}/${runId}`
     );
 
     if (!response.ok) {
