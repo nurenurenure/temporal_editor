@@ -101,13 +101,13 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Валидация шагов
+	//Валидация шагов
 	if err := validator.ValidateSteps(wf.Steps); err != nil {
 		http.Error(w, "Ошибка валидации: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// 2. Обновляем в БД
+	//Обновляем в БД
 	if err := database.UpdateWorkflow(id, &wf); err != nil {
 		http.Error(w, "Ошибка обновления в БД: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -127,7 +127,7 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		Document: models.Document{
 			DSL:          "1.0.0",
 			TaskQueue:    "zigflow",
-			WorkflowType: "custom-wf-" + id, // Используем id из URL
+			WorkflowType: "custom-wf-" + id,
 			Version:      "0.0.1",
 			Title:        wf.Name,
 			Summary:      wf.Description,
@@ -148,7 +148,7 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	go restartZigflowWorker()
 
-	// 4. Отдаем успешный ответ
+	//Отдаем успешный ответ
 	wf.ID = id // Гарантируем, что ID в ответе правильный
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
@@ -161,7 +161,7 @@ func updateWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 func runWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// 1. Читаем Payload (данные для цикла) из тела запроса
+	//Читаем Payload (данные для цикла) из тела запроса
 	var payload models.WorkflowPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Ошибка чтения данных: "+err.Error(), http.StatusBadRequest)
@@ -394,10 +394,10 @@ func deleteWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		// Файл может отсутствовать – это не критично, но логируем
 	}
 
-	// 3. Перезапускаем Zigflow Worker, чтобы он перечитал директорию workflows
+	// Перезапускаем Zigflow Worker, чтобы он перечитал директорию workflows
 	go restartZigflowWorker()
 
-	// 4. Ответ об успешном удалении
+	// Ответ об успешном удалении
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
