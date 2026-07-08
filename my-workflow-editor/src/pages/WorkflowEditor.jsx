@@ -701,7 +701,7 @@ const [validationErrors, setValidationErrors] = useState([]);
 const joinNodeId = findJoinNode(currentId);
 
 const branches = outEdges.map((edge, index) => ({
-    [`branch_${index + 1}`]: {
+    [`${node.data.stepName}_branch_${index + 1}`]: {
         do: buildNativeSequence(edge.target, new Set(visited), joinNodeId)
     }
 }));
